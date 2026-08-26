@@ -54,6 +54,7 @@ $test('public scheduler and bulk queue avoid duplicate active jobs', static func
     $assert(str_contains($cliSource, 'recent_public_error'));
     $assert(str_contains($cliSource, 'INTERVAL 24 HOUR'));
     $assert(!str_contains($cliSource, 'INTERVAL 6 HOUR'));
+    $assert(substr_count($cliSource, 'common_crawl_global_error') >= 2);
 });
 
 $test('UUID v4 format', static function () use ($assert): void {

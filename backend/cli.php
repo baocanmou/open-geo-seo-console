@@ -136,6 +136,12 @@ try {
                     AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 )
                 AND NOT EXISTS (
+                  SELECT 1 FROM provider_observations common_crawl_global_error
+                  WHERE common_crawl_global_error.integration_key = 'common_crawl'
+                    AND common_crawl_global_error.status = 'error'
+                    AND common_crawl_global_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                )
+                AND NOT EXISTS (
                   SELECT 1 FROM jobs queued_public
                   WHERE queued_public.job_type = 'public_collect'
                     AND queued_public.status IN ('queued','running')
@@ -252,6 +258,12 @@ try {
                   SELECT 1 FROM provider_observations recent_public_error
                   WHERE recent_public_error.site_id = s.id AND recent_public_error.status = 'error'
                     AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM provider_observations common_crawl_global_error
+                  WHERE common_crawl_global_error.integration_key = 'common_crawl'
+                    AND common_crawl_global_error.status = 'error'
+                    AND common_crawl_global_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 )
                 AND NOT EXISTS (
                   SELECT 1 FROM jobs j
