@@ -1,0 +1,47 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'sites' => [
+        ['Example Main Site', 'www.example.com', 'https://www.example.com/', '主要站点', 25, ['example.com']],
+        ['Example Product Site', 'www.example.org', 'https://www.example.org/', '产品站点', 20, ['example.org']],
+        ['Example Regional Site', 'www.example.net', 'https://www.example.net/', '区域站群', 15, ['example.net']],
+    ],
+    'integrations' => [
+        ['site_audit', '公开站点技术采集', 'analytics', 'public', '受控 HTTP 采集', 'public', '检查页面、Sitemap、robots、结构化数据与爬虫访问；不代表收录或排名。'],
+        ['google_search_console', 'Google Search Console', 'search', 'official', 'OAuth / Search Analytics API', 'unconfigured', '点击、展现、CTR 与平均位置；需逐站授权。'],
+        ['bing_webmaster', 'Bing Webmaster Tools', 'search', 'official', 'OAuth / Webmaster API', 'unconfigured', '关键词、流量、抓取与 Sitemap 状态；需授权。'],
+        ['baidu_search_resource', '百度搜索资源平台', 'search', 'official', '站点验证 / API / 证据导入', 'unconfigured', '提交、抓取、收录与排名分开记录；提交成功不等于收录。'],
+        ['yandex_webmaster', 'Yandex Webmaster', 'search', 'official', 'OAuth / Webmaster API', 'unconfigured', '国际俄语市场索引、查询与抓取数据。'],
+        ['360_search', '360 搜索', 'search', 'manual', '公开爬虫检查 / 平台证据导入', 'unconfigured', '自动采集 360Spider 可访问性；排名与收录只记录平台证据。'],
+        ['sogou_search', '搜狗搜索', 'search', 'manual', '公开爬虫检查 / 平台证据导入', 'unconfigured', '自动采集 Sogou web spider 可访问性；排名按可追溯证据记录。'],
+        ['shenma_search', '神马搜索', 'search', 'manual', '公开爬虫检查 / 平台证据导入', 'unconfigured', '自动采集 YisouSpider 可访问性；移动搜索状态需独立证据。'],
+        ['duckduckgo_search', 'DuckDuckGo', 'search', 'public', 'DuckDuckBot 访问检查 / 证据导入', 'public', '自动采集公开爬虫可访问性；不把可访问性等同于收录或排名。'],
+        ['apple_search', 'Apple Search / Siri / Spotlight', 'search', 'public', 'Applebot 与用途控制检查', 'public', '检查 Applebot 访问和 Applebot-Extended 用途声明；推荐结果需独立证据。'],
+        ['petal_search', 'Petal Search', 'search', 'public', 'PetalBot 访问检查 / 证据导入', 'public', '自动采集公开爬虫可访问性；结果曝光需平台证据。'],
+        ['naver_search', 'Naver Search Advisor', 'search', 'official', '站点验证 / 平台导出', 'unconfigured', '面向韩国市场的抓取、索引与查询证据。'],
+        ['brave_search', 'Brave Search', 'search', 'manual', '公开结果证据 / API', 'unconfigured', '使用合规 API 或可追溯证据，不直接抓取搜索结果页。'],
+        ['indexnow', 'IndexNow', 'search', 'official', 'IndexNow API', 'unconfigured', '提交记录与搜索引擎实际抓取、收录、排名分开。'],
+        ['openai_search', 'ChatGPT / OpenAI Search', 'ai', 'manual', '回答证据 / API', 'unconfigured', '跟踪品牌提及、引用 URL 与回答快照；OAI-SearchBot 与 GPTBot 分开。'],
+        ['perplexity', 'Perplexity', 'ai', 'manual', '回答证据 / API', 'unconfigured', '跟踪答案引用；PerplexityBot 与 Perplexity-User 分开。'],
+        ['claude', 'Claude', 'ai', 'manual', '回答证据 / API', 'unconfigured', 'Claude-SearchBot、Claude-User 与 ClaudeBot 分开。'],
+        ['google_gemini', 'Google Gemini', 'ai', 'manual', '回答证据 / API', 'unconfigured', 'AI 回答证据与 Google 搜索表现分开。'],
+        ['deepseek', 'DeepSeek', 'ai', 'manual', '回答证据 / API', 'unconfigured', '保存问题、模型版本、时间、提及与引用。'],
+        ['doubao', '豆包', 'ai', 'manual', '人工证据导入', 'unconfigured', '平台可验证证据优先，不以推测补值。'],
+        ['yuanbao', '腾讯元宝', 'ai', 'manual', '人工证据导入', 'unconfigured', '平台可验证证据优先，不以推测补值。'],
+        ['wenxin', '文心一言', 'ai', 'manual', '人工证据导入', 'unconfigured', '平台可验证证据优先，不以推测补值。'],
+        ['kimi', 'Kimi', 'ai', 'manual', '人工证据导入', 'unconfigured', '平台可验证证据优先，不以推测补值。'],
+        ['qwen', '通义千问', 'ai', 'manual', '人工证据导入', 'unconfigured', '平台可验证证据优先，不以推测补值。'],
+        ['microsoft_copilot', 'Microsoft Copilot', 'ai', 'manual', '回答证据 / Bing 数据', 'unconfigured', '回答引用与 Bing 搜索数据分层记录。'],
+        ['apple_intelligence', 'Apple Intelligence / Siri', 'ai', 'manual', '回答证据 / Applebot 控制', 'unconfigured', 'Applebot 可访问性与实际 AI 回答引用分开记录。'],
+        ['meta_ai', 'Meta AI', 'ai', 'manual', '回答证据导入', 'unconfigured', '保存提示词、时间、模型、提及与引用证据。'],
+        ['grok', 'Grok', 'ai', 'manual', '回答证据 / API', 'unconfigured', '仅通过授权接口或人工证据记录结果。'],
+        ['mistral_le_chat', 'Mistral Le Chat', 'ai', 'manual', '回答证据 / API', 'unconfigured', '仅通过授权接口或人工证据记录结果。'],
+        ['you_com', 'You.com', 'ai', 'manual', '回答证据 / API', 'unconfigured', '记录回答提及和引用，不将搜索可访问性当作推荐。'],
+        ['zhipu', '智谱清言', 'ai', 'manual', '回答证据 / API', 'unconfigured', '通过授权 API 或人工证据监测品牌提及。'],
+        ['spark', '讯飞星火', 'ai', 'manual', '回答证据 / API', 'unconfigured', '通过授权 API 或人工证据监测品牌提及。'],
+        ['hunyuan', '腾讯混元', 'ai', 'manual', '回答证据 / API', 'unconfigured', '与腾讯元宝前台证据分层记录。'],
+        ['common_crawl', 'Common Crawl', 'analytics', 'public', 'CCBot 访问检查', 'public', '采集 CCBot 可访问性；不代表任何 AI 产品会采用或推荐内容。'],
+    ],
+];

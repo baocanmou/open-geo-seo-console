@@ -1,0 +1,3 @@
+* * * * * www-data /usr/bin/flock -n /run/lock/open-geo-schedule.lock /usr/bin/php /opt/open-geo-seo-console/backend/cli.php schedule >/dev/null 2>&1
+* * * * * www-data /usr/bin/flock -n /run/lock/open-geo-worker.lock /usr/bin/php /opt/open-geo-seo-console/backend/cli.php worker >/dev/null 2>&1
+17 3 * * * www-data /usr/bin/flock -n /run/lock/open-geo-cleanup.lock /usr/bin/php /opt/open-geo-seo-console/backend/cli.php cleanup >/dev/null 2>&1
