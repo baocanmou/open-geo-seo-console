@@ -152,6 +152,14 @@ final class PublicDataParser
         ];
     }
 
+    public static function commonCrawlResponseSummary(int $status, string $body, array $allowedHosts): array
+    {
+        if ($status === 404) {
+            return self::commonCrawlSummary('', $allowedHosts);
+        }
+        return self::commonCrawlSummary($body, $allowedHosts);
+    }
+
     public static function pageSpeedSummary(string $json): array
     {
         $payload = json_decode($json, true, 64, JSON_THROW_ON_ERROR);
@@ -388,7 +396,7 @@ final class PublicDataCollector
                 . '?url=' . rawurlencode((string) $site['domain'] . '/*')
                 . '&output=json&filter=status%3A200&filter=mime%3Atext%2Fhtml&collapse=urlkey&limit=500';
             $records = $this->fetch($query, 4194304, true);
-            $summary = PublicDataParser::commonCrawlSummary($records->body, $allowedHosts);
+            $summary = PublicDataParser::commonCrawlResponseSummary($records->status, $records->body, $allowedHosts);
             $summary['crawl_index'] = $index['id'];
             return [$summary, $query, $summary['indexed_pages'] > 0 ? 'success' : 'empty'];
         });

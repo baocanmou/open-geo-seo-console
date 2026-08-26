@@ -113,6 +113,17 @@ $test('Common Crawl 404 is empty evidence while other provider errors remain err
     $assert(!OpenGeo\ProviderStatusPolicy::accepts(504, true));
 });
 
+$test('Common Crawl 404 response body is normalized to an empty observation', static function () use ($assert): void {
+    $summary = OpenGeo\PublicDataParser::commonCrawlResponseSummary(
+        404,
+        '<html><body>No Captures found</body></html>',
+        ['www.example.com', 'example.com']
+    );
+    $assert($summary['indexed_pages'] === 0);
+    $assert($summary['invalid_rows'] === 0);
+    $assert($summary['latest_capture_at'] === null);
+});
+
 $test('Common Crawl parser keeps only records for the registered host', static function () use ($assert): void {
     $records = implode("\n", [
         '{"url":"https://www.example.com/","timestamp":"20260820112233","status":"200","mime":"text/html"}',
