@@ -96,7 +96,7 @@ try {
                 AND NOT EXISTS (SELECT 1 FROM audit_runs ar WHERE ar.site_id = s.id AND ar.status IN ('queued','running'))
                 AND NOT EXISTS (SELECT 1 FROM audit_runs failed_run WHERE failed_run.site_id = s.id AND failed_run.status = 'failed' AND failed_run.created_at >= DATE_SUB(NOW(), INTERVAL {$failureBackoffHours} HOUR))
               ORDER BY (s.last_audit_at IS NULL) DESC, s.last_audit_at ASC, FIELD(s.group_name,'主要站点','产品站点','客户站点','区域站群'), s.id
-              LIMIT {$batch} FOR UPDATE SKIP LOCKED";
+              LIMIT {$batch} FOR UPDATE";
             $sites = $db->query($sql)->fetchAll();
             $runStmt = $db->prepare("INSERT INTO audit_runs (public_id, site_id, trigger_type, status, created_at) VALUES (?, ?, 'scheduled', 'queued', NOW())");
             $jobStmt = $db->prepare("INSERT INTO jobs (public_id, job_type, payload, status, available_at, created_at) VALUES (?, 'site_audit', ?, 'queued', NOW(), NOW())");

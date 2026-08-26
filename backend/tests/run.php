@@ -13,6 +13,13 @@ require dirname(__DIR__) . '/app/Core.php';
 require dirname(__DIR__) . '/app/Crawler.php';
 require dirname(__DIR__) . '/app/Auditor.php';
 
+$cliSource = file_get_contents(dirname(__DIR__) . "/cli.php");
+if (!is_string($cliSource) || str_contains($cliSource, "SKIP LOCKED")) {
+    fwrite(STDERR, "[FAIL] scheduler SQL remains incompatible with MySQL 5.7\n");
+    exit(1);
+}
+fwrite(STDOUT, "[PASS] scheduler SQL is compatible with MySQL 5.7\n");
+
 $tests = [];
 $test = static function (string $name, callable $callback) use (&$tests): void {
     try {
