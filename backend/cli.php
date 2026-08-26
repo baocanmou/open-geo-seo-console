@@ -133,7 +133,7 @@ try {
                 AND NOT EXISTS (
                   SELECT 1 FROM provider_observations recent_public_error
                   WHERE recent_public_error.site_id = s.id AND recent_public_error.status = 'error'
-                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 )
                 AND NOT EXISTS (
                   SELECT 1 FROM jobs queued_public
@@ -251,7 +251,7 @@ try {
                 AND NOT EXISTS (
                   SELECT 1 FROM provider_observations recent_public_error
                   WHERE recent_public_error.site_id = s.id AND recent_public_error.status = 'error'
-                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 )
                 AND NOT EXISTS (
                   SELECT 1 FROM jobs j

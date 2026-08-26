@@ -52,7 +52,8 @@ $test('public scheduler and bulk queue avoid duplicate active jobs', static func
     $assert(str_contains($cliSource, "JSON_EXTRACT(queued_public.payload, '$.site_id')"));
     $assert(substr_count($cliSource, "status IN ('success','empty')") >= 4);
     $assert(str_contains($cliSource, 'recent_public_error'));
-    $assert(str_contains($cliSource, 'INTERVAL 6 HOUR'));
+    $assert(str_contains($cliSource, 'INTERVAL 24 HOUR'));
+    $assert(!str_contains($cliSource, 'INTERVAL 6 HOUR'));
 });
 
 $test('UUID v4 format', static function () use ($assert): void {
