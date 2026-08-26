@@ -12,6 +12,10 @@ use OpenGeo\SiteAuditor;
 require dirname(__DIR__) . '/app/Core.php';
 require dirname(__DIR__) . '/app/Crawler.php';
 require dirname(__DIR__) . '/app/Auditor.php';
+$publicDataPath = dirname(__DIR__) . '/app/PublicData.php';
+if (is_file($publicDataPath)) {
+    require $publicDataPath;
+}
 
 $cliSource = file_get_contents(dirname(__DIR__) . "/cli.php");
 if (!is_string($cliSource) || str_contains($cliSource, "SKIP LOCKED")) {
@@ -34,6 +38,22 @@ $assert = static function (bool $condition, string $message = 'Assertion failed'
         throw new RuntimeException($message);
     }
 };
+
+$test('site audits and Lighthouse collections use separate privilege queues', static function () use ($assert, $cliSource): void {
+    $assert(str_contains($cliSource, "job_type = 'site_audit'"));
+    $assert(str_contains($cliSource, "case 'public-worker'"));
+    $assert(str_contains($cliSource, "job_type = 'public_collect'"));
+    $assert(str_contains($cliSource, 'Public Lighthouse worker must run as root.'));
+});
+
+$test('public scheduler and bulk queue avoid duplicate active jobs', static function () use ($assert, $cliSource): void {
+    $assert(substr_count($cliSource, "job_type = 'public_collect'") >= 2);
+    $assert(str_contains($cliSource, "status IN ('queued','running')"));
+    $assert(str_contains($cliSource, "JSON_EXTRACT(queued_public.payload, '$.site_id')"));
+    $assert(substr_count($cliSource, "status IN ('success','empty')") >= 4);
+    $assert(str_contains($cliSource, 'recent_public_error'));
+    $assert(str_contains($cliSource, 'INTERVAL 6 HOUR'));
+});
 
 $test('UUID v4 format', static function () use ($assert): void {
     $assert((bool) preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', Security::uuid()));
@@ -70,6 +90,119 @@ $test('fetch result keeps requested and final URLs distinct', static function ()
 $test('audit budget failures have a distinct exception type', static function () use ($assert): void {
     $error = new OpenGeo\AuditBudgetExceeded('budget');
     $assert($error instanceof RuntimeException);
+});
+
+$test('public provider policy accepts only pinned HTTPS endpoints', static function () use ($assert): void {
+    $assert(OpenGeo\ProviderEndpointPolicy::allows('https://index.commoncrawl.org/collinfo.json'));
+    $assert(OpenGeo\ProviderEndpointPolicy::allows('https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https%3A%2F%2Fexample.com%2F'));
+    foreach ([
+        'http://index.commoncrawl.org/collinfo.json',
+        'https://index.commoncrawl.org.evil.example/collinfo.json',
+        'https://user:pass@index.commoncrawl.org/collinfo.json',
+        'https://www.googleapis.com:444/pagespeedonline/v5/runPagespeed',
+    ] as $blocked) {
+        $assert(!OpenGeo\ProviderEndpointPolicy::allows($blocked), "Untrusted provider endpoint was allowed: {$blocked}");
+    }
+});
+
+$test('Common Crawl 404 is empty evidence while other provider errors remain errors', static function () use ($assert): void {
+    $assert(OpenGeo\ProviderStatusPolicy::accepts(200, false));
+    $assert(OpenGeo\ProviderStatusPolicy::accepts(404, true));
+    $assert(!OpenGeo\ProviderStatusPolicy::accepts(404, false));
+    $assert(!OpenGeo\ProviderStatusPolicy::accepts(400, true));
+    $assert(!OpenGeo\ProviderStatusPolicy::accepts(504, true));
+});
+
+$test('Common Crawl parser keeps only records for the registered host', static function () use ($assert): void {
+    $records = implode("\n", [
+        '{"url":"https://www.example.com/","timestamp":"20260820112233","status":"200","mime":"text/html"}',
+        '{"url":"https://www.example.com/about","timestamp":"20260821112233","status":"200","mime":"text/html"}',
+        '{"url":"https://evil.example/","timestamp":"20260822112233","status":"200","mime":"text/html"}',
+        '{"url":"https://www.example.com/file.pdf","timestamp":"20260823112233","status":"200","mime":"application/pdf"}',
+    ]);
+    $summary = OpenGeo\PublicDataParser::commonCrawlSummary($records, ['www.example.com', 'example.com']);
+    $assert($summary['indexed_pages'] === 2);
+    $assert($summary['latest_capture_at'] === '2026-08-21 11:22:33');
+});
+
+$test('PageSpeed parser returns bounded scores and lab metrics', static function () use ($assert): void {
+    $payload = json_encode([
+        'lighthouseResult' => [
+            'fetchTime' => '2026-08-26T10:00:00.000Z',
+            'categories' => [
+                'performance' => ['score' => 0.91],
+                'seo' => ['score' => 0.98],
+                'accessibility' => ['score' => 1.7],
+                'best-practices' => ['score' => -1],
+            ],
+            'audits' => [
+                'largest-contentful-paint' => ['numericValue' => 2310.4],
+                'cumulative-layout-shift' => ['numericValue' => 0.074],
+                'interaction-to-next-paint' => ['numericValue' => 189.6],
+                'total-blocking-time' => ['numericValue' => 120.2],
+            ],
+        ],
+    ], JSON_THROW_ON_ERROR);
+    $summary = OpenGeo\PublicDataParser::pageSpeedSummary($payload);
+    $assert($summary['performance_score'] === 91.0);
+    $assert($summary['seo_score'] === 98.0);
+    $assert($summary['accessibility_score'] === 100.0);
+    $assert($summary['best_practices_score'] === 0.0);
+    $assert($summary['lcp_ms'] === 2310);
+    $assert($summary['cls'] === 0.074);
+    $assert($summary['inp_ms'] === 190);
+    $assert($summary['tbt_ms'] === 120);
+});
+
+$test('local Lighthouse parser returns bounded scores and lab metrics', static function () use ($assert): void {
+    $payload = json_encode([
+        'fetchTime' => '2026-08-26T11:00:00.000Z',
+        'finalUrl' => 'https://www.example.com/',
+        'categories' => [
+            'performance' => ['score' => 0.87],
+            'seo' => ['score' => 0.96],
+            'accessibility' => ['score' => 1.2],
+            'best-practices' => ['score' => -0.2],
+        ],
+        'audits' => [
+            'largest-contentful-paint' => ['numericValue' => 2450.7],
+            'cumulative-layout-shift' => ['numericValue' => 0.0812],
+            'interaction-to-next-paint' => ['numericValue' => 211.1],
+            'total-blocking-time' => ['numericValue' => 138.7],
+        ],
+    ], JSON_THROW_ON_ERROR);
+    $summary = OpenGeo\PublicDataParser::lighthouseSummary($payload, 'https://www.example.com/');
+    $assert($summary['runner'] === 'self-hosted-lighthouse');
+    $assert($summary['performance_score'] === 87.0);
+    $assert($summary['seo_score'] === 96.0);
+    $assert($summary['accessibility_score'] === 100.0);
+    $assert($summary['best_practices_score'] === 0.0);
+    $assert($summary['lcp_ms'] === 2451);
+    $assert($summary['cls'] === 0.0812);
+    $assert($summary['inp_ms'] === 211);
+    $assert($summary['tbt_ms'] === 139);
+});
+
+$test('local Lighthouse command policy accepts only registered HTTPS targets', static function () use ($assert): void {
+    $assert(OpenGeo\LighthouseTargetPolicy::allows('https://www.example.com/', ['www.example.com', 'example.com']));
+    foreach ([
+        'http://www.example.com/',
+        'https://evil.example/',
+        'https://user:pass@www.example.com/',
+        'https://www.example.com.:443/',
+        'https://www.example.com:444/',
+    ] as $blocked) {
+        $assert(!OpenGeo\LighthouseTargetPolicy::allows($blocked, ['www.example.com', 'example.com']), "Unsafe Lighthouse target was allowed: {$blocked}");
+    }
+});
+
+$test('local Lighthouse runner requires live egress verification and avoids shell execution', static function () use ($assert): void {
+    $source = file_get_contents(dirname(__DIR__) . '/app/PublicData.php');
+    $assert(is_string($source));
+    $assert(str_contains($source, 'assertEgressIsolation'));
+    $assert(str_contains($source, 'proc_open($command'));
+    $assert(!str_contains($source, 'shell_exec('));
+    $assert(!str_contains($source, '--no-sandbox'));
 });
 
 $test('robots exact group overrides wildcard', static function () use ($assert): void {

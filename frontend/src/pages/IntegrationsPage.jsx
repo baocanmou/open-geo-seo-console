@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bot, Database, KeyRound, Radio, Search, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { DataSourceLegend, ErrorState, LoadingState, PageHeader, StatusPill } from '../components/UI'
-import { formatDate } from '../utils'
+import { formatDate, formatNumber } from '../utils'
 
 const categoryMeta = {
   search: { label: '搜索引擎', icon: Search },
@@ -58,7 +58,13 @@ export default function IntegrationsPage() {
               </span>
               <span><small>数据来源</small><strong>{item.data_source_label}</strong></span>
               <span><small>接入方式</small><strong>{item.access_mode}</strong></span>
-              <span><small>最近采集</small><strong>{formatDate(item.last_sync_at)}</strong></span>
+              <span>
+                <small>{item.data_source === 'public' ? '公开证据覆盖' : '逐站验证 / 已配置'}</small>
+                <strong>{item.data_source === 'public'
+                  ? `${formatNumber(item.observed_site_count)} 站 · ${formatNumber(item.observation_count)} 条`
+                  : `${formatNumber(item.verified_site_count)} / ${formatNumber(item.configured_site_count)}`}</strong>
+                <small>{formatDate(item.last_sync_at)}</small>
+              </span>
               <StatusPill status={item.status} />
               <button className="button button-secondary" type="button" disabled>
                 {item.status === 'authorized' ? '已连接' : item.data_source === 'public' ? '自动采集' : '待配置'}

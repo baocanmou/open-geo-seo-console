@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use OpenGeo\Config;
 use OpenGeo\Database;
+use OpenGeo\PublicDataCollector;
 use OpenGeo\SafeHttpClient;
 use OpenGeo\Security;
 use OpenGeo\SiteAuditor;
@@ -64,6 +65,12 @@ try {
             foreach ($catalog['integrations'] as $integration) {
                 $integrationStmt->execute($integration);
             }
+            $db->exec("INSERT INTO site_platform_status (site_id, integration_key, property_uri, state, created_at, updated_at)
+                SELECT s.id, i.integration_key, s.canonical_url, 'unconfigured', NOW(), NOW()
+                FROM sites s
+                JOIN integrations i ON i.integration_key IN ('google_search_console','baidu_search_resource','bing_webmaster','yandex_webmaster','naver_search','indexnow')
+                WHERE s.status = 'active'
+                ON DUPLICATE KEY UPDATE property_uri = VALUES(property_uri), updated_at = NOW()");
             fwrite(STDOUT, sprintf("Seeded %d sites and %d integrations.\n", count($catalog['sites']), count($catalog['integrations'])));
             break;
 
@@ -105,28 +112,92 @@ try {
                 $runStmt->execute([$auditId, $site['id']]);
                 $jobStmt->execute([Security::uuid(), json_encode(['audit_id' => $auditId], JSON_UNESCAPED_SLASHES)]);
             }
+
+            $publicBatch = max(1, min(Config::int('PUBLIC_SYNC_BATCH', 1), 2));
+            $publicSql = "SELECT s.id FROM sites s
+              WHERE s.status = 'active'
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM provider_observations po
+                    WHERE po.site_id = s.id AND po.integration_key = 'common_crawl'
+                      AND po.status IN ('success','empty')
+                      AND po.observed_at >= DATE_SUB(NOW(), INTERVAL 6 DAY)
+                  )
+                  OR NOT EXISTS (
+                    SELECT 1 FROM provider_observations po
+                    WHERE po.site_id = s.id AND po.integration_key = 'lighthouse_local'
+                      AND po.status IN ('success','empty')
+                      AND po.observed_at >= DATE_SUB(NOW(), INTERVAL 6 DAY)
+                  )
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM provider_observations recent_public_error
+                  WHERE recent_public_error.site_id = s.id AND recent_public_error.status = 'error'
+                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM jobs queued_public
+                  WHERE queued_public.job_type = 'public_collect'
+                    AND queued_public.status IN ('queued','running')
+                    AND CAST(JSON_UNQUOTE(JSON_EXTRACT(queued_public.payload, '$.site_id')) AS UNSIGNED) = s.id
+                )
+              ORDER BY FIELD(s.group_name,'主要站点','产品站点','客户站点','区域站群'), s.id
+              LIMIT {$publicBatch} FOR UPDATE";
+            $publicSites = $db->query($publicSql)->fetchAll();
+            $publicJobStmt = $db->prepare("INSERT INTO jobs (public_id, job_type, payload, status, available_at, created_at) VALUES (?, 'public_collect', ?, 'queued', NOW(), NOW())");
+            foreach ($publicSites as $publicSite) {
+                $publicJobStmt->execute([Security::uuid(), json_encode(['site_id' => (int) $publicSite['id']], JSON_UNESCAPED_SLASHES)]);
+            }
             $db->commit();
-            fwrite(STDOUT, sprintf("Scheduled %d audit(s).\n", count($sites)));
+            fwrite(STDOUT, sprintf("Scheduled %d audit(s) and %d public collection(s).\n", count($sites), count($publicSites)));
             break;
 
         case 'worker':
             $db->beginTransaction();
-            $job = $db->query("SELECT * FROM jobs WHERE status = 'queued' AND available_at <= NOW() ORDER BY id LIMIT 1 FOR UPDATE")->fetch();
+            $job = $db->query("SELECT * FROM jobs WHERE status = 'queued' AND job_type = 'site_audit' AND available_at <= NOW() ORDER BY id LIMIT 1 FOR UPDATE")->fetch();
             if (!$job) {
                 $db->commit();
-                fwrite(STDOUT, "Queue is empty.\n");
+                fwrite(STDOUT, "Site audit queue is empty.\n");
                 break;
             }
             $db->prepare("UPDATE jobs SET status = 'running', attempts = attempts + 1, started_at = NOW() WHERE id = ?")->execute([$job['id']]);
             $db->commit();
             try {
                 $payload = json_decode($job['payload'], true, 16, JSON_THROW_ON_ERROR);
-                if ($job['job_type'] !== 'site_audit' || empty($payload['audit_id'])) {
-                    throw new RuntimeException('Unsupported or malformed job.');
+                if (empty($payload['audit_id'])) {
+                    throw new RuntimeException('Malformed site audit job.');
                 }
                 (new SiteAuditor($db, new SafeHttpClient()))->run((string) $payload['audit_id']);
                 $db->prepare("UPDATE jobs SET status = 'completed', completed_at = NOW(), error_message = NULL WHERE id = ?")->execute([$job['id']]);
-                fwrite(STDOUT, "Job completed.\n");
+                fwrite(STDOUT, "Site audit job completed.\n");
+            } catch (Throwable $error) {
+                $db->prepare("UPDATE jobs SET status = 'failed', completed_at = NOW(), error_message = ? WHERE id = ?")->execute([mb_substr($error->getMessage(), 0, 500), $job['id']]);
+                throw $error;
+            }
+            break;
+
+        case 'public-worker':
+            if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+                throw new RuntimeException('Public Lighthouse worker must run as root.');
+            }
+            $db->beginTransaction();
+            $job = $db->query("SELECT * FROM jobs WHERE status = 'queued' AND job_type = 'public_collect' AND available_at <= NOW() ORDER BY id LIMIT 1 FOR UPDATE")->fetch();
+            if (!$job) {
+                $db->commit();
+                fwrite(STDOUT, "Public collection queue is empty.\n");
+                break;
+            }
+            $db->prepare("UPDATE jobs SET status = 'running', attempts = attempts + 1, started_at = NOW() WHERE id = ?")->execute([$job['id']]);
+            $db->commit();
+            try {
+                $payload = json_decode($job['payload'], true, 16, JSON_THROW_ON_ERROR);
+                $siteId = (int) ($payload['site_id'] ?? 0);
+                if ($siteId < 1) {
+                    throw new RuntimeException('Malformed public collection job.');
+                }
+                (new PublicDataCollector($db, new SafeHttpClient()))->collectSite($siteId);
+                $db->prepare("UPDATE jobs SET status = 'completed', completed_at = NOW(), error_message = NULL WHERE id = ?")->execute([$job['id']]);
+                fwrite(STDOUT, "Public collection job completed.\n");
             } catch (Throwable $error) {
                 $db->prepare("UPDATE jobs SET status = 'failed', completed_at = NOW(), error_message = ? WHERE id = ?")->execute([mb_substr($error->getMessage(), 0, 500), $job['id']]);
                 throw $error;
@@ -158,6 +229,45 @@ try {
             fwrite(STDOUT, "Audit queued: {$auditId}\n");
             break;
 
+        case 'collect-public':
+            $domain = strtolower(trim($argv[2] ?? ''));
+            $stmt = $db->prepare("SELECT id FROM sites WHERE domain = ? AND status = 'active' LIMIT 1");
+            $stmt->execute([$domain]);
+            $siteId = (int) $stmt->fetchColumn();
+            if ($siteId < 1) {
+                throw new RuntimeException('Registered site not found.');
+            }
+            $result = (new PublicDataCollector($db, new SafeHttpClient()))->collectSite($siteId);
+            fwrite(STDOUT, json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
+            break;
+
+        case 'queue-public-all':
+            $siteIds = $db->query("SELECT s.id FROM sites s
+              WHERE s.status = 'active'
+                AND (
+                  NOT EXISTS (SELECT 1 FROM provider_observations po WHERE po.site_id = s.id AND po.integration_key = 'common_crawl' AND po.status IN ('success','empty') AND po.observed_at >= DATE_SUB(NOW(), INTERVAL 6 DAY))
+                  OR NOT EXISTS (SELECT 1 FROM provider_observations po WHERE po.site_id = s.id AND po.integration_key = 'lighthouse_local' AND po.status IN ('success','empty') AND po.observed_at >= DATE_SUB(NOW(), INTERVAL 6 DAY))
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM provider_observations recent_public_error
+                  WHERE recent_public_error.site_id = s.id AND recent_public_error.status = 'error'
+                    AND recent_public_error.observed_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM jobs j
+                  WHERE j.job_type = 'public_collect' AND j.status IN ('queued','running')
+                    AND CAST(JSON_UNQUOTE(JSON_EXTRACT(j.payload, '$.site_id')) AS UNSIGNED) = s.id
+                )
+              ORDER BY s.id")->fetchAll(PDO::FETCH_COLUMN);
+            $stmt = $db->prepare("INSERT INTO jobs (public_id, job_type, payload, status, available_at, created_at) VALUES (?, 'public_collect', ?, 'queued', NOW(), NOW())");
+            $queued = 0;
+            foreach ($siteIds as $siteId) {
+                $stmt->execute([Security::uuid(), json_encode(['site_id' => (int) $siteId], JSON_UNESCAPED_SLASHES)]);
+                $queued++;
+            }
+            fwrite(STDOUT, sprintf("Queued %d missing public collection job(s).\n", $queued));
+            break;
+
         case 'cleanup':
             $loginRows = $db->exec("DELETE FROM login_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 50000");
             $activityRows = $db->exec("DELETE FROM activity_log WHERE created_at < DATE_SUB(NOW(), INTERVAL 365 DAY) LIMIT 50000");
@@ -165,7 +275,7 @@ try {
             break;
 
         default:
-            fwrite(STDOUT, "Open GEO CLI\nCommands: migrate, seed, create-admin, schedule, worker, queue-site <domain>, cleanup\n");
+            fwrite(STDOUT, "Open GEO CLI\nCommands: migrate, seed, create-admin, schedule, worker, public-worker, queue-site <domain>, collect-public <domain>, queue-public-all, cleanup\n");
     }
 } catch (Throwable $error) {
     if ($db->inTransaction()) {

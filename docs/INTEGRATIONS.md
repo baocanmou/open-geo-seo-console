@@ -1,10 +1,10 @@
 # Integration and evidence matrix
 
-The seed catalog currently contains 34 integration records across search, AI, analytics, and submission workflows. Twenty-two crawler/control tokens are checked as part of each public site audit.
+The seed catalog currently contains 36 integration records across search, AI, analytics, and submission workflows. Twenty-two crawler/control tokens are checked as part of each public site audit.
 
 ## Automatic public collection
 
-The auditor evaluates robots policy and, when the token represents a real fetcher, performs a bounded homepage request for major search and retrieval crawlers. Extended-use tokens that do not fetch pages are evaluated as robots controls without sending a synthetic HTTP probe.
+The auditor evaluates robots policy and, when the token represents a real fetcher, performs a bounded homepage request for major search and retrieval crawlers. Extended-use tokens that do not fetch pages are evaluated as robots controls without sending a synthetic HTTP probe. A separate public-data queue stores Common Crawl CDXJ observations and optional self-hosted Lighthouse lab results. Lighthouse output is not Google field data and does not imply ranking.
 
 ## Authorized collection
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   CalendarDays,
+  Database,
   ChevronLeft,
   Clock3,
   Download,
@@ -141,6 +142,66 @@ function EngineCoverage({ integrations }) {
   )
 }
 
+function PublicObservationTable({ observations }) {
+  if (!observations.length) {
+    return <EmptyState title="公开数据尚未采集" detail="系统将按站点分批采集 Common Crawl 与自托管 Lighthouse 证据。" />
+  }
+
+  const describe = (item) => {
+    const summary = item.summary || {}
+    if (item.integration_key === 'common_crawl') {
+      return `开放语料样本 ${formatNumber(summary.indexed_pages)} 页 · 最近抓取 ${summary.latest_capture_at || '暂无'} UTC`
+    }
+    if (item.integration_key === 'lighthouse_local') {
+      return `性能 ${formatNumber(summary.performance_score)} · SEO ${formatNumber(summary.seo_score)} · LCP ${formatNumber(summary.lcp_ms)}ms`
+    }
+    return summary.error || '已保存可追溯公开证据'
+  }
+
+  return (
+    <div className="table-scroll">
+      <table className="data-table compact-table">
+        <thead><tr><th>公开来源</th><th>状态</th><th>证据摘要</th><th>采集时间</th><th>哈希</th></tr></thead>
+        <tbody>
+          {observations.map((item) => (
+            <tr key={item.id}>
+              <td><strong>{item.display_name}</strong></td>
+              <td><StatusPill status={item.status === 'success' ? 'healthy' : item.status} /></td>
+              <td>{describe(item)}</td>
+              <td>{formatDate(item.observed_at)}</td>
+              <td><span className="truncate-url" title={item.evidence_hash}>{item.evidence_hash?.slice(0, 12) || '—'}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PlatformStatusTable({ statuses }) {
+  if (!statuses.length) {
+    return <EmptyState title="逐站平台台账尚未初始化" detail="部署数据库迁移后自动建立 Google、百度及国际站长平台状态。" />
+  }
+  return (
+    <div className="table-scroll">
+      <table className="data-table compact-table">
+        <thead><tr><th>平台</th><th>站点属性</th><th>阶段</th><th>验证方式</th><th>最近同步</th></tr></thead>
+        <tbody>
+          {statuses.map((item) => (
+            <tr key={item.integration_key}>
+              <td><strong>{item.display_name}</strong></td>
+              <td><span className="truncate-url" title={item.property_uri}>{item.property_uri || '待添加'}</span></td>
+              <td><StatusPill status={item.state} /></td>
+              <td>{item.verification_method || '待配置'}</td>
+              <td>{formatDate(item.last_sync_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function EvidenceTimeline({ evidence }) {
   if (!evidence.length) {
     return <EmptyState title="尚无 AI 推荐证据" detail="配置模型连接或导入人工快照后，保存提示词、回答、品牌提及与引用链接。" />
@@ -230,7 +291,16 @@ export default function SitePage() {
   if (state.error) return <ErrorState message={state.error} onRetry={load} />
 
   const data = state.data
-  const { site, findings, bot_checks: bots, integrations, evidence, tasks } = data
+  const {
+    site,
+    findings,
+    bot_checks: bots,
+    integrations,
+    evidence,
+    public_observations: publicObservations = [],
+    platform_statuses: platformStatuses = [],
+    tasks,
+  } = data
 
   return (
     <div className="page site-page">
@@ -280,6 +350,13 @@ export default function SitePage() {
             </div>
           )}
 
+          {activeTab === 'overview' && (
+            <article className="panel">
+              <div className="panel-heading"><div><h2>免费公开数据证据</h2><p>Common Crawl 开放语料与自托管 Lighthouse 实验室数据</p></div><Database size={19} /></div>
+              <PublicObservationTable observations={publicObservations} />
+            </article>
+          )}
+
           {(activeTab === 'overview' || activeTab === 'ai') && (
             <article className="panel">
               <div className="panel-heading"><div><h2>AI推荐证据时间线</h2><p>保存提示词、回答、提及、引用与时间</p></div><Bot size={19} /></div>
@@ -287,7 +364,18 @@ export default function SitePage() {
             </article>
           )}
 
-          {activeTab === 'engines' && <article className="panel"><EngineCoverage integrations={integrations} /></article>}
+          {activeTab === 'engines' && (
+            <>
+              <article className="panel">
+                <div className="panel-heading"><div><h2>搜索引擎连接</h2><p>全局连接器与最近同步状态</p></div></div>
+                <EngineCoverage integrations={integrations} />
+              </article>
+              <article className="panel">
+                <div className="panel-heading"><div><h2>逐站接入阶段</h2><p>已添加、已验证、已提交、已抓取、已收录、已有排名分开记录</p></div></div>
+                <PlatformStatusTable statuses={platformStatuses} />
+              </article>
+            </>
+          )}
           {activeTab === 'keywords' && <article className="panel"><EmptyState title="关键词数据待授权" detail="Google、Bing、百度等官方数据接入后按查询词、页面、国家与设备分析。" /></article>}
           {activeTab === 'settings' && (
             <article className="panel settings-summary">

@@ -1,0 +1,13 @@
+[Unit]
+Description=Open GEO Lighthouse private-network egress isolation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/open-geo-lighthouse-egress start
+ExecStop=/usr/local/sbin/open-geo-lighthouse-egress stop
+
+[Install]
+WantedBy=multi-user.target

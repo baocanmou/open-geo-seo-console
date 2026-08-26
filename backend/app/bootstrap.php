@@ -11,6 +11,7 @@ define('OPEN_GEO_ROOT', dirname(__DIR__));
 require OPEN_GEO_ROOT . '/app/Core.php';
 require OPEN_GEO_ROOT . '/app/Crawler.php';
 require OPEN_GEO_ROOT . '/app/Auditor.php';
+require OPEN_GEO_ROOT . '/app/PublicData.php';
 require OPEN_GEO_ROOT . '/app/Api.php';
 
 Config::load(OPEN_GEO_ROOT . '/.env');

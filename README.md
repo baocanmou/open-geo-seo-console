@@ -8,7 +8,7 @@ The repository ships with reserved example domains only. It contains no producti
 
 - Audits HTML, metadata, canonical URLs, headings, structured data, robots.txt, sitemaps, `llms.txt`, response status, and response time.
 - Checks 22 search, retrieval, training, and extended-use crawler controls during every site audit.
-- Catalogs 34 search, AI, analytics, and submission integrations with explicit `public`, `official`, or `manual` evidence modes.
+- Catalogs 36 search, AI, analytics, and submission integrations with explicit `public`, `official`, or `manual` evidence modes.
 - Stores search snapshots, AI answer evidence, findings, tasks, audit runs, and privacy-preserving activity records.
 - Protects the console with Argon2id-compatible password hashing, stateless pre-login CSRF, same-origin checks, nonblocking per-account verification serialization, per-IP and account-plus-IP failure limits, strict cookies, idle and absolute session expiry, session-ID rotation, password-change revocation, and browser binding.
 - Bounds every audit by elapsed time, total requests, total response bytes, per-document size, and a singleton worker lease.
@@ -23,6 +23,7 @@ Public crawler probes establish only whether the configured robots policy and a 
 - PHP 8.2+ with `curl`, `dom`, `mbstring`, `pdo_mysql`, and `sodium`
 - MySQL 8.0+
 - Node.js 22+ and npm
+- Chromium and the pinned open-source Lighthouse 12.8.2 CLI for optional local lab audits
 - Nginx or an equivalent HTTPS reverse proxy
 
 ## Quick start
@@ -52,7 +53,7 @@ Use a unique random value of at least 16 characters. See [Deployment](docs/DEPLO
 
 ## Scheduled collection
 
-Run the scheduler and worker as the web-service account. A sample is in `deploy/open-geo.cron`. Site audits automatically collect public technical signals and crawler-control evidence. Integrations that require an account, OAuth grant, or API token remain visibly unconfigured until an operator supplies valid authorization on their own server.
+Run the scheduler and normal site-audit worker as the web-service account. Run only `public-worker` as root so it can switch to the isolated `open-geo-lighthouse` account. A sample is in `deploy/open-geo.cron`. Site audits collect technical signals; Common Crawl and local Lighthouse evidence are stored separately. Integrations that require an account, OAuth grant, or API token remain visibly unconfigured until an operator supplies valid authorization on their own server.
 
 ## Development
 

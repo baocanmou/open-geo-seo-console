@@ -10,6 +10,8 @@ return [
     ],
     'integrations' => [
         ['site_audit', '公开站点技术采集', 'analytics', 'public', '受控 HTTP 采集', 'public', '检查页面、Sitemap、robots、结构化数据与爬虫访问；不代表收录或排名。'],
+        ['pagespeed_insights', 'Google PageSpeed Insights（可选）', 'analytics', 'public', 'Google PageSpeed API', 'disabled', '远程 API 为可选数据源；网络不可达时保持禁用，不把失败或提交当作排名。'],
+        ['lighthouse_local', '自托管 Lighthouse', 'analytics', 'public', '隔离的开源 Lighthouse CLI', 'public', '在专用低权限账号和私网出站隔离下串行采集性能、SEO、无障碍与最佳实践实验室证据；不代表排名。'],
         ['google_search_console', 'Google Search Console', 'search', 'official', 'OAuth / Search Analytics API', 'unconfigured', '点击、展现、CTR 与平均位置；需逐站授权。'],
         ['bing_webmaster', 'Bing Webmaster Tools', 'search', 'official', 'OAuth / Webmaster API', 'unconfigured', '关键词、流量、抓取与 Sitemap 状态；需授权。'],
         ['baidu_search_resource', '百度搜索资源平台', 'search', 'official', '站点验证 / API / 证据导入', 'unconfigured', '提交、抓取、收录与排名分开记录；提交成功不等于收录。'],
@@ -42,6 +44,6 @@ return [
         ['zhipu', '智谱清言', 'ai', 'manual', '回答证据 / API', 'unconfigured', '通过授权 API 或人工证据监测品牌提及。'],
         ['spark', '讯飞星火', 'ai', 'manual', '回答证据 / API', 'unconfigured', '通过授权 API 或人工证据监测品牌提及。'],
         ['hunyuan', '腾讯混元', 'ai', 'manual', '回答证据 / API', 'unconfigured', '与腾讯元宝前台证据分层记录。'],
-        ['common_crawl', 'Common Crawl', 'analytics', 'public', 'CCBot 访问检查', 'public', '采集 CCBot 可访问性；不代表任何 AI 产品会采用或推荐内容。'],
+        ['common_crawl', 'Common Crawl', 'analytics', 'public', 'Common Crawl CDXJ 开放索引', 'public', '记录站点是否出现在最新开放网页语料索引及样本页面数；不代表任何 AI 产品采用、训练或推荐。'],
     ],
 ];

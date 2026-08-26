@@ -17,6 +17,7 @@ Include the affected commit, reproduction steps against a local or disposable en
 - Terminate TLS at a maintained reverse proxy and keep `SESSION_SECURE=true`.
 - Do not expose MySQL, PHP-FPM, storage, migrations, seeds, or CLI files publicly.
 - Grant third-party OAuth scopes and API tokens only when a collector needs them.
+- Do not enable local Lighthouse without the dedicated account, fixed-port firewall template, live rule verification, Chromium sandbox, serial lock, and root-owned readiness marker.
 - Back up and test restore procedures before schema or application upgrades.
 - For an Internet-facing admin panel, add provider-level bot protection and prefer MFA or SSO. The built-in account/IP throttles reduce common bursts but are not a complete defense against distributed credential stuffing.
 

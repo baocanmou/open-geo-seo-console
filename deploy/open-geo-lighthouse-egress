@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+iptables_bin=/usr/sbin/iptables
+ip6tables_bin=/usr/sbin/ip6tables
+chain4=OPEN_GEO_LIGHTHOUSE_OUT
+chain6=OPEN_GEO_LIGHTHOUSE6_OUT
+user_name=open-geo-lighthouse
+
+read_dns_servers() {
+  /usr/bin/awk '/^[[:space:]]*nameserver[[:space:]]+/ {print $2}' /etc/resolv.conf
+}
+
+start_rules() {
+  "$iptables_bin" -N "$chain4" 2>/dev/null || true
+  "$iptables_bin" -F "$chain4"
+  "$ip6tables_bin" -N "$chain6" 2>/dev/null || true
+  "$ip6tables_bin" -F "$chain6"
+
+  while IFS= read -r dns_server; do
+    if [[ "$dns_server" == *:* ]]; then
+      "$ip6tables_bin" -A "$chain6" -p udp -d "$dns_server" --dport 53 -j ACCEPT
+      "$ip6tables_bin" -A "$chain6" -p tcp -d "$dns_server" --dport 53 -j ACCEPT
+    elif [[ -n "$dns_server" ]]; then
+      "$iptables_bin" -A "$chain4" -p udp -d "$dns_server" --dport 53 -j ACCEPT
+      "$iptables_bin" -A "$chain4" -p tcp -d "$dns_server" --dport 53 -j ACCEPT
+    fi
+  done < <(read_dns_servers)
+
+  "$iptables_bin" -A "$chain4" -p tcp -d 127.0.0.1 --dport 49222 -j ACCEPT
+  "$iptables_bin" -A "$chain4" -p tcp -s 127.0.0.1 --sport 49222 -d 127.0.0.1 -j ACCEPT
+  for network in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24 192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4; do
+    "$iptables_bin" -A "$chain4" -d "$network" -j REJECT
+  done
+  "$iptables_bin" -A "$chain4" -j RETURN
+  "$iptables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain4" 2>/dev/null || "$iptables_bin" -I OUTPUT 1 -m owner --uid-owner "$user_name" -j "$chain4"
+
+  "$ip6tables_bin" -A "$chain6" -p tcp -d ::1 --dport 49222 -j ACCEPT
+  "$ip6tables_bin" -A "$chain6" -p tcp -s ::1 --sport 49222 -d ::1 -j ACCEPT
+  "$ip6tables_bin" -A "$chain6" -j REJECT
+  "$ip6tables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain6" 2>/dev/null || "$ip6tables_bin" -I OUTPUT 1 -m owner --uid-owner "$user_name" -j "$chain6"
+}
+
+stop_rules() {
+  while "$iptables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain4" 2>/dev/null; do
+    "$iptables_bin" -D OUTPUT -m owner --uid-owner "$user_name" -j "$chain4"
+  done
+  "$iptables_bin" -F "$chain4" 2>/dev/null || true
+  "$iptables_bin" -X "$chain4" 2>/dev/null || true
+  while "$ip6tables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain6" 2>/dev/null; do
+    "$ip6tables_bin" -D OUTPUT -m owner --uid-owner "$user_name" -j "$chain6"
+  done
+  "$ip6tables_bin" -F "$chain6" 2>/dev/null || true
+  "$ip6tables_bin" -X "$chain6" 2>/dev/null || true
+}
+
+verify_rules() {
+  "$iptables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain4"
+  "$iptables_bin" -C "$chain4" -p tcp -d 127.0.0.1 --dport 49222 -j ACCEPT
+  "$iptables_bin" -C "$chain4" -p tcp -s 127.0.0.1 --sport 49222 -d 127.0.0.1 -j ACCEPT
+  "$iptables_bin" -C "$chain4" -d 100.64.0.0/10 -j REJECT
+  "$iptables_bin" -C "$chain4" -d 169.254.0.0/16 -j REJECT
+  "$iptables_bin" -C "$chain4" -d 10.0.0.0/8 -j REJECT
+  "$ip6tables_bin" -C OUTPUT -m owner --uid-owner "$user_name" -j "$chain6"
+  "$ip6tables_bin" -C "$chain6" -j REJECT
+}
+
+case "${1:-}" in
+  start) start_rules ;;
+  stop) stop_rules ;;
+  restart) stop_rules; start_rules ;;
+  verify) verify_rules ;;
+  *) exit 64 ;;
+esac

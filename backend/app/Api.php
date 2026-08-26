@@ -85,6 +85,8 @@ final class Api
             ROUND(AVG(geo_score), 2) AS geo_average,
             (SELECT COUNT(*) FROM integrations WHERE category = 'search' AND status = 'authorized') AS search_authorized,
             (SELECT COUNT(*) FROM ai_evidence) AS ai_evidence_count,
+            (SELECT COUNT(*) FROM provider_observations WHERE status IN ('success','empty')) AS public_observation_count,
+            (SELECT COUNT(DISTINCT site_id) FROM provider_observations WHERE status IN ('success','empty')) AS public_observed_sites,
             (SELECT COUNT(*) FROM tasks WHERE status <> 'resolved' AND priority IN ('critical','high')) AS high_priority_tasks,
             MAX(last_audit_at) AS last_collected_at
           FROM sites WHERE status = 'active'")->fetch();
@@ -152,6 +154,17 @@ final class Api
         $taskStmt->execute([$site['id']]);
         $evidenceStmt = $this->db->prepare('SELECT public_id AS id, provider_key, provider_name, prompt, brand_mentioned, cited_url, source_type, captured_at FROM ai_evidence WHERE site_id = ? ORDER BY captured_at DESC LIMIT 40');
         $evidenceStmt->execute([$site['id']]);
+        $observationStmt = $this->db->prepare('SELECT po.public_id AS id, po.integration_key, i.display_name, po.snapshot_date, po.status, po.summary_json, po.source_reference, po.evidence_hash, po.observed_at FROM provider_observations po JOIN integrations i ON i.integration_key = po.integration_key WHERE po.site_id = ? ORDER BY po.observed_at DESC LIMIT 40');
+        $observationStmt->execute([$site['id']]);
+        $observations = $observationStmt->fetchAll();
+        foreach ($observations as &$observation) {
+            $decoded = json_decode((string) $observation['summary_json'], true, 32);
+            $observation['summary'] = is_array($decoded) ? $decoded : [];
+            unset($observation['summary_json']);
+        }
+        unset($observation);
+        $platformStmt = $this->db->prepare("SELECT sps.integration_key, i.display_name, sps.property_uri, sps.state, sps.verification_method, sps.evidence_reference, sps.verified_at, sps.last_sync_at, sps.notes FROM site_platform_status sps JOIN integrations i ON i.integration_key = sps.integration_key WHERE sps.site_id = ? ORDER BY FIELD(i.category, 'search','ai','analytics'), i.id");
+        $platformStmt->execute([$site['id']]);
         $officialAuthorized = (int) $this->db->query("SELECT COUNT(*) FROM integrations WHERE data_source = 'official' AND status = 'authorized'")->fetchColumn() > 0;
         return [
             'site' => [
@@ -163,6 +176,8 @@ final class Api
             'bot_checks' => $bots,
             'integrations' => $this->integrations(),
             'evidence' => $evidenceStmt->fetchAll(),
+            'public_observations' => $observations,
+            'platform_statuses' => $platformStmt->fetchAll(),
             'tasks' => $taskStmt->fetchAll(),
             'official_authorized' => $officialAuthorized,
         ];
@@ -229,7 +244,12 @@ final class Api
 
     private function integrations(): array
     {
-        $rows = $this->db->query('SELECT integration_key AS `key`, display_name, category, data_source, access_mode, status, notes, last_sync_at FROM integrations ORDER BY FIELD(category, \'search\',\'ai\',\'analytics\'), id')->fetchAll();
+        $rows = $this->db->query("SELECT i.integration_key AS `key`, i.display_name, i.category, i.data_source, i.access_mode, i.status, i.notes, i.last_sync_at,
+          (SELECT COUNT(*) FROM provider_observations po WHERE po.integration_key = i.integration_key) AS observation_count,
+          (SELECT COUNT(DISTINCT po.site_id) FROM provider_observations po WHERE po.integration_key = i.integration_key AND po.status IN ('success','empty')) AS observed_site_count,
+          (SELECT COUNT(*) FROM site_platform_status sps WHERE sps.integration_key = i.integration_key AND sps.state <> 'unconfigured') AS configured_site_count,
+          (SELECT COUNT(*) FROM site_platform_status sps WHERE sps.integration_key = i.integration_key AND sps.state IN ('verified','submitted','crawled','indexed','ranking')) AS verified_site_count
+          FROM integrations i ORDER BY FIELD(i.category, 'search','ai','analytics'), i.id")->fetchAll();
         $labels = ['official' => '官方接口', 'public' => '公开采集', 'manual' => '人工证据'];
         foreach ($rows as &$row) {
             $row['data_source_label'] = $labels[$row['data_source']] ?? $row['data_source'];
