@@ -6,8 +6,10 @@ The repository ships with reserved example domains only. It contains no producti
 
 ## What it does
 
+- Runs the built-in BCM-GEO Core without API keys: eight explainable dimensions, entity consistency, answer extraction, evidence quality, duplicate detection, topic-intent coverage, crawler reachability, and impact/effort/confidence prioritization.
+- Uses bounded rotating page batches and a version-and-formula-scoped rolling evidence window, so scheduled audits expand coverage without mixing incompatible evidence or burst-crawling a protected site.
 - Audits HTML, metadata, canonical URLs, headings, structured data, robots.txt, sitemaps, `llms.txt`, response status, and response time.
-- Checks 22 search, retrieval, training, and extended-use crawler controls during every site audit.
+- Parses 22 search, retrieval, training, and extended-use crawler controls during every site audit without impersonating official bots by default.
 - Catalogs 36 search, AI, analytics, and submission integrations with explicit `public`, `official`, or `manual` evidence modes.
 - Stores search snapshots, AI answer evidence, findings, tasks, audit runs, and privacy-preserving activity records.
 - Protects the console with Argon2id-compatible password hashing, stateless pre-login CSRF, same-origin checks, nonblocking per-account verification serialization, per-IP and account-plus-IP failure limits, strict cookies, idle and absolute session expiry, session-ID rotation, password-change revocation, and browser binding.
@@ -15,9 +17,15 @@ The repository ships with reserved example domains only. It contains no producti
 - Bounds every audit by elapsed time, total requests, total response bytes, per-document size, and a singleton worker lease.
 - Encrypts integration configuration at rest with libsodium when configuration is supplied by an authorized deployment.
 
+## Built-in GEO core
+
+BCM-GEO Core is the account-free baseline, not a proxy for a vendor API. It derives versioned, reproducible scores from public pages and stores the signal set, content hash, formula hash, page dimensions, site aggregation, and recommendations with every audit. See [GEO Core](docs/GEO-CORE.md) for the formula and evidence boundary.
+
+Official Google, Bing, Baidu, analytics, or model connections enrich this baseline with first-party performance evidence. They are optional and never silently substitute unavailable ranking, indexing, citation, or recommendation data.
+
 ## Evidence boundaries
 
-Public crawler probes establish only whether the configured robots policy and a controlled HTTP request allow access at that moment. Search position, index coverage, and AI citation or recommendation require official API data or traceable captured evidence. The project intentionally does not scrape search-result pages or invent unavailable metrics.
+Public collection establishes only what the configured robots policy says and whether the console's own paced collector can retrieve a page at that moment. Optional User-Agent probes are labeled controlled simulations, not official crawler observations. Search position, index coverage, and AI citation or recommendation require official API data or traceable captured evidence. The project intentionally does not scrape search-result pages, score keyword repetition, treat `llms.txt` as a ranking signal, or invent unavailable metrics.
 
 ## Requirements
 
@@ -55,7 +63,7 @@ The self-service password policy defaults to 16 characters through `PASSWORD_MIN
 
 ## Scheduled collection
 
-Run the scheduler and normal site-audit worker as the web-service account. Run only `public-worker` as root so it can switch to the isolated `open-geo-lighthouse` account. A sample is in `deploy/open-geo.cron`. Site audits collect technical signals; Common Crawl and local Lighthouse evidence are stored separately. Integrations that require an account, OAuth grant, or API token remain visibly unconfigured until an operator supplies valid authorization on their own server.
+Run the scheduler and normal site-audit worker as the web-service account. Run only `public-worker` as root so it can switch to the isolated `open-geo-lighthouse` account. A sample is in `deploy/open-geo.cron`. Site audits collect a rotating batch (four pages by default) and aggregate the latest distinct-page evidence from a 30-day window; Common Crawl and local Lighthouse evidence are stored separately. Integrations that require an account, OAuth grant, or API token remain visibly unconfigured until an operator supplies valid authorization on their own server.
 
 ## Development
 

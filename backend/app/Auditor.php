@@ -65,6 +65,12 @@ final class SiteAuditor
     {
         $siteId = (int) $run['site_id'];
         $runId = (int) $run['id'];
+        $maxPages = max(1, (int) $run['max_pages']);
+        $pageBatch = min($maxPages, max(1, min(Config::int('AUDIT_PAGE_BATCH', 4), 8)));
+        $rollingDays = max(1, min(Config::int('GEO_ROLLING_WINDOW_DAYS', 30), 90));
+        $completedStmt = $this->db->prepare("SELECT COUNT(*) FROM audit_runs WHERE site_id = ? AND status = 'completed'");
+        $completedStmt->execute([$siteId]);
+        $rotationOffset = (int) $completedStmt->fetchColumn() * max(1, $pageBatch - 1);
         $allowedHosts = [$run['domain']];
         $aliasStmt = $this->db->prepare('SELECT hostname FROM site_aliases WHERE site_id = ?');
         $aliasStmt->execute([$siteId]);
@@ -93,7 +99,7 @@ final class SiteAuditor
             $pendingSitemaps[] = $origin . '/sitemap_index.xml';
         }
         $seenSitemaps = [];
-        while ($pendingSitemaps !== [] && count($seenSitemaps) < 8 && count($urls) < (int) $run['max_pages']) {
+        while ($pendingSitemaps !== [] && count($seenSitemaps) < 8 && count($urls) < $maxPages) {
             $sitemapUrl = array_shift($pendingSitemaps);
             if (isset($seenSitemaps[$sitemapUrl])) {
                 continue;
@@ -102,7 +108,7 @@ final class SiteAuditor
             try {
                 $sitemap = $this->http->get($sitemapUrl, $allowedHosts, null, 1048576);
                 if ($sitemap->status < 400) {
-                    $remaining = max(1, (int) $run['max_pages'] - count($urls));
+                    $remaining = max(1, $maxPages - count($urls));
                     $urls = array_merge($urls, SitemapReader::urls($sitemap->body, $allowedHosts, $remaining));
                     foreach (SitemapReader::indexes($sitemap->body, $allowedHosts, 8) as $childSitemap) {
                         if (!isset($seenSitemaps[$childSitemap])) {
@@ -118,21 +124,27 @@ final class SiteAuditor
                 $this->addFinding($findings, 'sitemap_unavailable', 'technical', 'medium', 'Sitemap 无法被采集器读取', mb_substr($error->getMessage(), 0, 220), '检查 Sitemap 地址、TLS、CDN/WAF 与公网可访问性。', $sitemapUrl);
             }
         }
-        $urls = array_slice(array_values(array_unique($urls)), 0, max(1, (int) $run['max_pages']));
+        $urls = array_slice(array_values(array_unique($urls)), 0, $maxPages);
+        $rotationApplied = count($urls) > 1;
+        if ($rotationApplied) {
+            $urls = self::rotateUrlCandidates($urls, $rotationOffset);
+        }
         $technicalScores = [];
-        $geoScores = [];
+        $geoPageSignals = [];
         $audited = 0;
+        $attempted = 0;
         $knownUrls = array_fill_keys($urls, true);
-        for ($position = 0; $position < count($urls) && $position < (int) $run['max_pages']; $position++) {
+        for ($position = 0; $position < count($urls) && $position < $maxPages && $attempted < $pageBatch; $position++) {
             $this->http->assertAuditBudget();
             $url = $urls[$position];
+            $attempted++;
             try {
                 $result = $this->http->get($url, $allowedHosts);
                 if ($result->status >= 300 && $result->status < 400) {
                     $this->addFinding($findings, 'redirect_unresolved', 'technical', 'medium', '页面重定向未收敛', "HTTP {$result->status}: {$url}", '将站内 URL 直接指向最终规范地址，并检查重定向链。', $url);
                 }
                 if (str_contains(strtolower($result->contentType()), 'html')) {
-                    $remainingLinks = max(0, (int) $run['max_pages'] - count($urls));
+                    $remainingLinks = max(0, $maxPages - count($urls));
                     foreach (HtmlLinkExtractor::links($result->body, $result->finalUrl, $allowedHosts, $remainingLinks) as $link) {
                         $path = (string) (parse_url($link, PHP_URL_PATH) ?: '/');
                         if (!isset($knownUrls[$link]) && $robots->allows('OPENGEO-Audit', $path, function (): void {
@@ -142,16 +154,24 @@ final class SiteAuditor
                             $urls[] = $link;
                         }
                     }
+                    if ($position === 0 && !$rotationApplied && count($urls) > 1) {
+                        $urls = self::rotateUrlCandidates($urls, $rotationOffset);
+                        $rotationApplied = true;
+                    }
                 }
-                [$page, $pageFindings, $technicalScore, $geoScore] = $this->analyzePage($result);
-                $this->storePage($runId, $siteId, $page);
+                [$page, $pageFindings, $technicalScore, $geoScore, $geoAnalysis] = $this->analyzePage($result);
+                $pageAuditId = $this->storePage($runId, $siteId, $page);
                 foreach ($pageFindings as $finding) {
                     $this->addFinding($findings, ...$finding);
                 }
                 if ($technicalScore !== null) {
                     $technicalScores[] = $technicalScore;
-                    $geoScores[] = $geoScore;
                     $audited++;
+                }
+                if (is_array($geoAnalysis) && $geoScore !== null) {
+                    $geoAnalysis['url'] = (string) $page['final_url'];
+                    $geoPageSignals[] = $geoAnalysis;
+                    $this->storeGeoPage($runId, $siteId, $pageAuditId, (string) $page['final_url'], $geoAnalysis);
                 }
             } catch (AuditBudgetExceeded $error) {
                 throw $error;
@@ -186,19 +206,79 @@ final class SiteAuditor
 
         $this->http->assertAuditBudget();
         $technical = $technicalScores === [] ? null : round(array_sum($technicalScores) / count($technicalScores), 2);
-        $geo = $geoScores === [] ? null : round(array_sum($geoScores) / count($geoScores), 2);
+        $botStmt = $this->db->prepare('SELECT purpose, robots_allowed, http_status, access_allowed FROM bot_checks WHERE audit_run_id = ?');
+        $botStmt->execute([$runId]);
+        $rollingSignals = $this->loadRollingGeoSignals($siteId, $rollingDays);
+        $siteGeo = GeoCore::aggregate($rollingSignals, $botStmt->fetchAll());
+        $siteGeo['coverage'] = array_merge((array) ($siteGeo['coverage'] ?? []), [
+            'pages_sampled_this_run' => count($geoPageSignals),
+            'pages_attempted_this_run' => $attempted,
+            'pages_discovered_this_run' => count($urls),
+            'rolling_window_days' => $rollingDays,
+        ]);
+        $geo = $siteGeo['score'];
         if ($technical !== null && isset($findings['crawler_access_denied'])) {
             $technical = max(0, $technical - 10);
-            $geo = $geo === null ? null : max(0, $geo - 10);
         }
         if ($technical !== null && isset($findings['sitemap_unavailable'])) {
             $technical = max(0, $technical - 5);
         }
+        $this->storeGeoSnapshot($runId, $siteId, $siteGeo);
         $this->storeFindingsAndTasks($runId, $siteId, $findings);
         $this->db->prepare("UPDATE audit_runs SET status = 'completed', pages_discovered = ?, pages_audited = ?, technical_score = ?, geo_score = ?, completed_at = NOW() WHERE id = ?")
             ->execute([count($urls), $audited, $technical, $geo, $runId]);
         $this->db->prepare('UPDATE sites SET technical_score = ?, geo_score = ?, last_audit_at = NOW(), updated_at = NOW() WHERE id = ?')
             ->execute([$technical, $geo, $siteId]);
+    }
+
+    /** @param list<string> $urls @return list<string> */
+    public static function rotateUrlCandidates(array $urls, int $offset): array
+    {
+        $urls = array_values(array_unique(array_filter(array_map('trim', $urls))));
+        if (count($urls) <= 2) {
+            return $urls;
+        }
+        $root = array_shift($urls);
+        $offset = (($offset % count($urls)) + count($urls)) % count($urls);
+        if ($offset > 0) {
+            $urls = array_merge(array_slice($urls, $offset), array_slice($urls, 0, $offset));
+        }
+        array_unshift($urls, $root);
+        return $urls;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function loadRollingGeoSignals(int $siteId, int $days, int $limit = 500): array
+    {
+        $days = max(1, min($days, 90));
+        $limit = max(1, min($limit, 1000));
+        $sql = "SELECT final_url, overall_score, dimensions_json, content_hash, primary_entities_json, intents_json
+            FROM geo_page_signals
+            WHERE site_id = ? AND algorithm_version = ? AND formula_hash = ? AND captured_at >= DATE_SUB(NOW(), INTERVAL {$days} DAY)
+            ORDER BY id DESC LIMIT {$limit}";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$siteId, GeoCore::VERSION, GeoCore::formulaHash()]);
+        $signals = [];
+        $seen = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $url = (string) $row['final_url'];
+            if ($url === '' || isset($seen[$url])) {
+                continue;
+            }
+            $seen[$url] = true;
+            $dimensions = json_decode((string) $row['dimensions_json'], true, 64);
+            $entities = json_decode((string) $row['primary_entities_json'], true, 64);
+            $intents = json_decode((string) $row['intents_json'], true, 64);
+            $signals[] = [
+                'url' => $url,
+                'score' => (float) $row['overall_score'],
+                'dimensions' => is_array($dimensions) ? $dimensions : [],
+                'content_hash' => (string) $row['content_hash'],
+                'primary_entities' => is_array($entities) ? $entities : [],
+                'intents' => is_array($intents) ? $intents : [],
+            ];
+        }
+        return $signals;
     }
 
     private function analyzePage(FetchResult $result): array
@@ -226,16 +306,16 @@ final class SiteAuditor
         $geo = 100;
         if (in_array($result->status, [401, 403, 429], true)) {
             $findings[] = ['crawler_access_denied', 'security', 'medium', '受控采集器访问被拒绝', "HTTP {$result->status}: {$url}", '检查 CDN/WAF 的 User-Agent、频率与来源策略；该状态仅证明本次采集受限，不直接等同于搜索引擎无法访问。', $url];
-            return [$page, $findings, null, null];
+            return [$page, $findings, null, null, null];
         }
         if ($result->status >= 400) {
             $severity = $result->status >= 500 ? 'critical' : 'high';
             $findings[] = ['http_error', 'technical', $severity, "页面返回 HTTP {$result->status}", $url, '修复失效页面或将内部链接、Sitemap 更新为有效的最终 URL。', $url];
-            return [$page, $findings, 45, 45];
+            return [$page, $findings, 45, null, null];
         }
         if (!str_contains(strtolower($result->contentType()), 'html')) {
             $findings[] = ['non_html_url', 'technical', 'low', 'Sitemap 包含非 HTML URL', $result->contentType(), '将页面型 Sitemap 限定为可索引 HTML 规范页面。', $url];
-            return [$page, $findings, 88, 70];
+            return [$page, $findings, 88, null, null];
         }
 
         $previous = libxml_use_internal_errors(true);
@@ -247,7 +327,7 @@ final class SiteAuditor
         libxml_use_internal_errors($previous);
         if (!$loaded) {
             $findings[] = ['html_parse_failed', 'technical', 'high', 'HTML 无法稳定解析', 'DOM 解析失败', '修复不完整标签、异常编码或网关注入内容。', $url];
-            return [$page, $findings, 55, 55];
+            return [$page, $findings, 55, null, null];
         }
         $xpath = new DOMXPath($dom);
         $title = trim((string) ($xpath->query('//title')->item(0)?->textContent ?? ''));
@@ -258,13 +338,6 @@ final class SiteAuditor
         $language = trim((string) ($xpath->query('/html/@lang')->item(0)?->nodeValue ?? ''));
         $bodyText = preg_replace('/\s+/u', ' ', trim((string) ($xpath->query('//body')->item(0)?->textContent ?? '')));
         $wordCount = max(count(preg_split('/\s+/u', $bodyText, -1, PREG_SPLIT_NO_EMPTY) ?: []), (int) ceil(mb_strlen(preg_replace('/\s+/u', '', $bodyText)) / 2));
-        $types = [];
-        foreach ($xpath->query('//script[translate(@type,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="application/ld+json"]') ?: [] as $script) {
-            if (preg_match_all('/"@type"\s*:\s*"([^"]+)"/u', $script->textContent, $matches)) {
-                $types = array_merge($types, $matches[1]);
-            }
-        }
-        $types = array_values(array_unique($types));
         $images = $xpath->query('//img');
         $missingAlt = 0;
         foreach ($images ?: [] as $image) {
@@ -272,6 +345,20 @@ final class SiteAuditor
                 $missingAlt++;
             }
         }
+        $geoAnalysis = GeoCore::analyzeDocument($xpath, [
+            'url' => $url,
+            'http_status' => $result->status,
+            'indexable' => !str_contains($robotsMeta, 'noindex'),
+            'canonical_url' => $canonical,
+            'title' => $title,
+            'description' => $description,
+            'h1_count' => $h1Count,
+            'language' => $language,
+            'body_text' => $bodyText,
+            'word_count' => $wordCount,
+            'missing_alt' => $missingAlt,
+        ]);
+        $types = (array) ($geoAnalysis['signals']['schema_types'] ?? []);
         $page = array_merge($page, [
             'title_text' => $title ?: null,
             'meta_description' => $description ?: null,
@@ -319,41 +406,41 @@ final class SiteAuditor
             $findings[] = ['slow_response', 'performance', 'medium', '页面响应偏慢', "服务端完整响应约 {$result->durationMs}ms", '检查源站、缓存与数据库；该值是本次采集时延，不等同于 Core Web Vitals。', $url];
             $technical -= 5;
         }
-        if ($wordCount < 180) {
-            $findings[] = ['thin_content', 'geo', 'medium', '页面可引用正文偏少', "估算正文 {$wordCount} 词", '补充清晰定义、适用场景、步骤、证据与常见问题，避免无意义扩写。', $url];
-            $geo -= 12;
-        }
-        $entityTypes = array_intersect($types, ['Organization', 'LocalBusiness', 'Product', 'Service', 'Article', 'NewsArticle']);
-        if ($entityTypes === []) {
-            $findings[] = ['missing_entity_schema', 'geo', 'medium', '缺少核心实体结构化数据', $types === [] ? '未检测到 JSON-LD 类型' : '已检测：' . implode(', ', $types), '按页面真实内容补充 Organization、Service、Product 或 Article 等合适类型。', $url];
-            $geo -= 10;
-        }
         if ($types === []) {
             $technical -= 4;
         }
-        $headingCount = ($xpath->query('//h2')?->length ?? 0) + ($xpath->query('//h3')?->length ?? 0);
-        if ($wordCount >= 300 && $headingCount < 2) {
-            $findings[] = ['weak_content_structure', 'geo', 'low', '长内容缺少清晰分段', "正文约 {$wordCount} 词，H2/H3 共 {$headingCount} 个", '用问题式或主题式标题组织定义、比较、步骤与结论，便于人和检索系统定位答案。', $url];
-            $geo -= 5;
+        foreach ((array) ($geoAnalysis['recommendations'] ?? []) as $recommendation) {
+            $dimension = (string) ($recommendation['dimension'] ?? 'unknown');
+            $dimensionScore = (float) ($geoAnalysis['dimensions'][$dimension] ?? 0);
+            $severity = $dimensionScore < 40 ? 'high' : ($dimensionScore < 60 ? 'medium' : 'low');
+            $findings[] = [
+                'geo_core_' . $dimension,
+                'geo',
+                $severity,
+                (string) ($recommendation['title'] ?? 'GEO 信号需要增强'),
+                sprintf('%s %.1f/100；算法 %s；证据哈希 %s', (string) ($recommendation['label'] ?? $dimension), $dimensionScore, GeoCore::VERSION, substr((string) $geoAnalysis['content_hash'], 0, 12)),
+                (string) ($recommendation['action'] ?? ''),
+                $url,
+            ];
         }
-        $hasAuthority = preg_match('/(作者|发布日期|更新时间|关于我们|联系方式|资质|来源|参考)/u', $bodyText) === 1;
-        if ($wordCount >= 300 && !$hasAuthority) {
-            $findings[] = ['weak_authority_signals', 'geo', 'low', '权威与来源信号不足', '未发现作者、日期、来源、资质或联系方式等常见信号', '根据页面类型补充真实作者、更新时间、来源依据、主体与联系方式。', $url];
-            $geo -= 5;
-        }
-        return [$page, $findings, max(0, $technical), max(0, $geo)];
+        return [$page, $findings, max(0, $technical), (float) $geoAnalysis['score'], $geoAnalysis];
     }
 
     private function checkBots(int $runId, int $siteId, string $origin, array $allowedHosts, RobotsPolicy $robots, array &$findings): void
     {
         $insert = $this->db->prepare('INSERT INTO bot_checks (audit_run_id, site_id, bot_name, purpose, purpose_label, robots_allowed, http_status, access_allowed, evidence, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
         $touchIntegration = $this->db->prepare("UPDATE integrations SET last_sync_at = NOW(), updated_at = NOW() WHERE integration_key = ? AND data_source = 'public'");
-        foreach (self::BOTS as [$bot, $purpose, $label, $integrationKey, $probeHttp]) {
+        $configuredProbes = array_slice(array_values(array_unique(array_filter(array_map(
+            'trim',
+            explode(',', Config::get('AUDIT_BOT_HTTP_PROBES', ''))
+        )))), 0, 4);
+        foreach (self::BOTS as [$bot, $purpose, $label, $integrationKey, $canProbeHttp]) {
             $this->http->assertAuditBudget();
             $allowed = $robots->allows($bot, '/', function (): void {
                 $this->http->assertAuditBudget();
             });
             $status = null;
+            $probeHttp = $canProbeHttp && in_array($bot, $configuredProbes, true);
             if ($probeHttp) {
                 try {
                     $result = $this->http->get($origin . '/', $allowedHosts, $bot . '/1.0 (+https://github.com/yht0912/open-geo-seo-console)', 131072);
@@ -365,11 +452,14 @@ final class SiteAuditor
                 }
             }
             $accessible = $allowed && (!$probeHttp || ($status >= 200 && $status < 400));
-            $httpEvidence = $probeHttp ? ($status ?: 'failed') : 'not-applicable';
-            $evidence = sprintf('robots=%s; http=%s', $allowed ? 'allow' : 'disallow', $httpEvidence);
+            $httpEvidence = $probeHttp ? ($status ?: 'failed') : 'not-probed';
+            $scope = $probeHttp ? 'robots+controlled-http' : 'robots-policy';
+            $evidence = sprintf('robots=%s; http=%s; scope=%s', $allowed ? 'allow' : 'disallow', $httpEvidence, $scope);
             $insert->execute([$runId, $siteId, $bot, $purpose, $label, $allowed ? 1 : 0, $status ?: null, $accessible ? 1 : 0, $evidence]);
             $touchIntegration->execute([$integrationKey]);
-            if (!$accessible && in_array($purpose, ['search', 'retrieval'], true)) {
+            if (!$allowed && in_array($purpose, ['search', 'retrieval'], true)) {
+                $this->addFinding($findings, 'bot_policy_' . strtolower(str_replace('-', '_', $bot)), 'technical', 'high', "robots.txt 限制 {$bot}", $evidence, '核对业务用途后调整 robots.txt；搜索检索与训练用途应分开授权。', $origin . '/robots.txt');
+            } elseif ($probeHttp && !$accessible && in_array($purpose, ['search', 'retrieval'], true)) {
                 $this->addFinding($findings, 'bot_access_' . strtolower(str_replace('-', '_', $bot)), 'technical', 'high', "{$bot} 无法访问首页", $evidence, '检查 robots.txt、CDN/WAF 与源站响应；先确认该爬虫用途，再决定是否允许。', $origin . '/');
             }
         }
@@ -388,7 +478,7 @@ final class SiteAuditor
         $bucket[$code]['count']++;
     }
 
-    private function storePage(int $runId, int $siteId, array $page): void
+    private function storePage(int $runId, int $siteId, array $page): int
     {
         $structuredTypes = array_slice(array_values(array_unique(array_map(
             static fn(mixed $type): string => mb_substr((string) $type, 0, 160),
@@ -411,6 +501,46 @@ final class SiteAuditor
             $page['indexable'],
             $page['response_ms'],
         ]);
+        return (int) $this->db->lastInsertId();
+    }
+
+    private function storeGeoPage(int $runId, int $siteId, int $pageAuditId, string $url, array $analysis): void
+    {
+        $stmt = $this->db->prepare('INSERT INTO geo_page_signals (audit_run_id, site_id, page_audit_id, final_url, algorithm_version, formula_hash, overall_score, dimensions_json, signals_json, content_hash, primary_entities_json, intents_json, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+        $stmt->execute([
+            $runId,
+            $siteId,
+            $pageAuditId,
+            mb_substr($url, 0, 1000),
+            GeoCore::VERSION,
+            GeoCore::formulaHash(),
+            $analysis['score'],
+            self::json($analysis['dimensions'] ?? []),
+            self::json($analysis['signals'] ?? []),
+            $analysis['content_hash'],
+            self::json($analysis['primary_entities'] ?? []),
+            self::json($analysis['intents'] ?? []),
+        ]);
+    }
+
+    private function storeGeoSnapshot(int $runId, int $siteId, array $snapshot): void
+    {
+        $stmt = $this->db->prepare('INSERT INTO geo_site_snapshots (audit_run_id, site_id, algorithm_version, formula_hash, overall_score, dimensions_json, coverage_json, recommendations_json, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+        $stmt->execute([
+            $runId,
+            $siteId,
+            GeoCore::VERSION,
+            GeoCore::formulaHash(),
+            $snapshot['score'],
+            self::json($snapshot['dimensions'] ?? []),
+            self::json($snapshot['coverage'] ?? []),
+            self::json($snapshot['recommendations'] ?? []),
+        ]);
+    }
+
+    private static function json(mixed $value): string
+    {
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
     }
 
     private function storeFindingsAndTasks(int $runId, int $siteId, array $findings): void

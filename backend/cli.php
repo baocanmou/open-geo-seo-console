@@ -159,6 +159,14 @@ try {
             break;
 
         case 'worker':
+            $globalInterval = max(0, min(Config::int('AUDIT_GLOBAL_MIN_INTERVAL_SECONDS', 45), 300));
+            if ($globalInterval > 0) {
+                $recentAudit = $db->query("SELECT 1 FROM audit_runs WHERE status = 'completed' AND completed_at >= DATE_SUB(NOW(), INTERVAL {$globalInterval} SECOND) LIMIT 1")->fetchColumn();
+                if ($recentAudit) {
+                    fwrite(STDOUT, "Site audit worker is inside the global crawl cooldown.\n");
+                    break;
+                }
+            }
             $db->beginTransaction();
             $job = $db->query("SELECT * FROM jobs WHERE status = 'queued' AND job_type = 'site_audit' AND available_at <= NOW() ORDER BY id LIMIT 1 FOR UPDATE")->fetch();
             if (!$job) {

@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS geo_page_signals (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  audit_run_id BIGINT UNSIGNED NOT NULL,
+  site_id BIGINT UNSIGNED NOT NULL,
+  page_audit_id BIGINT UNSIGNED NOT NULL,
+  final_url VARCHAR(1000) NOT NULL,
+  algorithm_version VARCHAR(32) NOT NULL,
+  formula_hash CHAR(64) NOT NULL,
+  overall_score DECIMAL(5,2) NOT NULL,
+  dimensions_json MEDIUMTEXT NOT NULL,
+  signals_json MEDIUMTEXT NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  primary_entities_json TEXT NOT NULL,
+  intents_json TEXT NOT NULL,
+  captured_at DATETIME NOT NULL,
+  UNIQUE KEY uq_geo_page_audit (page_audit_id),
+  INDEX idx_geo_page_run (audit_run_id),
+  INDEX idx_geo_page_site (site_id, captured_at),
+  INDEX idx_geo_page_hash (site_id, content_hash),
+  CONSTRAINT fk_geo_page_run FOREIGN KEY (audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_geo_page_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+  CONSTRAINT fk_geo_page_audit FOREIGN KEY (page_audit_id) REFERENCES page_audits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS geo_site_snapshots (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  audit_run_id BIGINT UNSIGNED NOT NULL,
+  site_id BIGINT UNSIGNED NOT NULL,
+  algorithm_version VARCHAR(32) NOT NULL,
+  formula_hash CHAR(64) NOT NULL,
+  overall_score DECIMAL(5,2) NULL,
+  dimensions_json MEDIUMTEXT NOT NULL,
+  coverage_json MEDIUMTEXT NOT NULL,
+  recommendations_json MEDIUMTEXT NOT NULL,
+  computed_at DATETIME NOT NULL,
+  UNIQUE KEY uq_geo_site_run (audit_run_id),
+  INDEX idx_geo_site_time (site_id, computed_at),
+  CONSTRAINT fk_geo_site_run FOREIGN KEY (audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_geo_site_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

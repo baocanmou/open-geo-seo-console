@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use OpenGeo\FetchResult;
+use OpenGeo\GeoCore;
 use OpenGeo\PasswordPolicy;
 use OpenGeo\RobotsPolicy;
 use OpenGeo\Security;
@@ -12,6 +13,7 @@ use OpenGeo\SiteAuditor;
 
 require dirname(__DIR__) . '/app/Core.php';
 require dirname(__DIR__) . '/app/Crawler.php';
+require dirname(__DIR__) . '/app/GeoCore.php';
 require dirname(__DIR__) . '/app/Auditor.php';
 $publicDataPath = dirname(__DIR__) . '/app/PublicData.php';
 if (is_file($publicDataPath)) {
@@ -97,6 +99,12 @@ $test('public scheduler and bulk queue avoid duplicate active jobs', static func
     $assert(substr_count($cliSource, 'common_crawl_global_error') >= 2);
 });
 
+$test('site audit worker enforces a bounded global crawl cooldown', static function () use ($assert, $cliSource): void {
+    $assert(str_contains($cliSource, "AUDIT_GLOBAL_MIN_INTERVAL_SECONDS', 45"));
+    $assert(str_contains($cliSource, 'INTERVAL {$globalInterval} SECOND'));
+    $assert(str_contains($cliSource, 'global crawl cooldown'));
+});
+
 $test('UUID v4 format', static function () use ($assert): void {
     $assert((bool) preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', Security::uuid()));
 });
@@ -132,6 +140,16 @@ $test('fetch result keeps requested and final URLs distinct', static function ()
 $test('audit budget failures have a distinct exception type', static function () use ($assert): void {
     $error = new OpenGeo\AuditBudgetExceeded('budget');
     $assert($error instanceof RuntimeException);
+});
+
+$test('crawler avoids WAF-sensitive content-encoding negotiation', static function () use ($assert): void {
+    $source = file_get_contents(dirname(__DIR__) . '/app/Crawler.php');
+    $assert(is_string($source));
+    $assert(!str_contains($source, 'CURLOPT_ENCODING'));
+    $assert(!str_contains($source, 'Accept-Encoding: identity'));
+    $assert(str_contains($source, 'Mozilla/5.0 (compatible; OpenGEO-Audit/1.0;'));
+    $assert(str_contains($source, "CRAWL_MIN_INTERVAL_MS', 1000"));
+    $assert(str_contains($source, "AUDIT_MAX_SECONDS', 120"));
 });
 
 $test('public provider policy accepts only pinned HTTPS endpoints', static function () use ($assert): void {
@@ -299,6 +317,26 @@ $test('HTML links stay on registered hosts and normalize paths', static function
     $assert(OpenGeo\HtmlLinkExtractor::links($html, 'https://example.com/section/page.html', ['example.com'], 10) === ['https://example.com/cases.html']);
 });
 
+$test('rolling audit rotation keeps the homepage and advances through unique pages', static function () use ($assert): void {
+    $urls = ['https://example.com/', 'https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d', 'https://example.com/a'];
+    $rotated = SiteAuditor::rotateUrlCandidates($urls, 3);
+    $assert($rotated === ['https://example.com/', 'https://example.com/d', 'https://example.com/a', 'https://example.com/b', 'https://example.com/c']);
+    $assert(SiteAuditor::rotateUrlCandidates($urls, 7) === $rotated);
+});
+
+$test('rolling GEO aggregation is bounded, versioned and opt-in configurable', static function () use ($assert): void {
+    $source = file_get_contents(dirname(__DIR__) . '/app/Auditor.php');
+    $apiSource = file_get_contents(dirname(__DIR__) . '/app/Api.php');
+    $assert(is_string($source) && is_string($apiSource));
+    $assert(str_contains($source, "AUDIT_PAGE_BATCH', 4"));
+    $assert(str_contains($source, "GEO_ROLLING_WINDOW_DAYS', 30"));
+    $assert(str_contains($source, 'algorithm_version = ?'));
+    $assert(str_contains($source, 'formula_hash = ?'));
+    $assert(str_contains($apiSource, 'algorithm_version = ?'));
+    $assert(str_contains($apiSource, 'formula_hash = ?'));
+    $assert(GeoCore::VERSION === '2.2.0');
+});
+
 $test('HTTP 403 is coverage evidence, not a broken-page score', static function () use ($assert): void {
     $auditor = (new ReflectionClass(SiteAuditor::class))->newInstanceWithoutConstructor();
     $method = new ReflectionMethod(SiteAuditor::class, 'analyzePage');
@@ -317,8 +355,91 @@ $test('HTML audit emits evidence-backed findings', static function () use ($asse
     $codes = array_column($findings, 0);
     $assert(in_array('missing_title', $codes, true));
     $assert(in_array('missing_canonical', $codes, true));
-    $assert(in_array('thin_content', $codes, true));
+    $assert(in_array('geo_core_answerability', $codes, true));
     $assert($technical < 100 && $geo < 100);
+});
+
+$test('GEO core rewards answerable, evidenced and machine-readable content', static function () use ($assert): void {
+    $html = <<<'HTML'
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>企业品牌定位服务指南</title><link rel="canonical" href="https://example.com/service"><link rel="alternate" hreflang="en" href="https://example.com/en/service"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Service","name":"品牌定位咨询","url":"https://example.com/service","provider":{"@type":"Organization","name":"示例咨询机构","url":"https://example.com/","sameAs":["https://example.org/profile"],"contactPoint":{"@type":"ContactPoint","telephone":"400-000-0000"}},"areaServed":"中国"}</script></head><body><main><article><h1 id="guide">企业品牌定位服务指南</h1><p>什么是品牌定位？品牌定位是指企业在目标顾客心智中建立清晰差异的方法。</p><h2 id="steps">如何开展品牌定位？</h2><ol><li>研究顾客</li><li>分析竞争</li><li>形成证据</li></ol><h2 id="evidence">证据与适用边界</h2><p>作者：示例研究组。发布日期：2026-08-20。更新时间：2026-08-26。数据来源：<a href="https://www.wipo.int/">WIPO</a>。联系我们获取公开方法说明。</p><h2 id="faq">常见问题</h2><p>是否适用于小企业？需要结合企业阶段判断。</p></article></main></body></html>
+HTML;
+    $dom = new DOMDocument();
+    $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+    $xpath = new DOMXPath($dom);
+    $body = trim((string) $xpath->query('//body')->item(0)?->textContent);
+    $analysis = GeoCore::analyzeDocument($xpath, [
+        'url' => 'https://example.com/service', 'http_status' => 200, 'indexable' => true,
+        'canonical_url' => 'https://example.com/service', 'title' => '企业品牌定位服务指南', 'description' => '公开指南',
+        'h1_count' => 1, 'language' => 'zh-CN', 'body_text' => $body, 'word_count' => 520, 'missing_alt' => 0,
+    ]);
+    $assert($analysis['score'] >= 75, 'Rich evidence page should score at least 75.');
+    $assert($analysis['dimensions']['entity_clarity'] >= 80);
+    $assert($analysis['dimensions']['answerability'] >= 65);
+    $assert($analysis['dimensions']['evidence_trust'] >= 75);
+    $assert(in_array('service', $analysis['intents'], true));
+    $assert($analysis['formula_hash'] === GeoCore::formulaHash());
+});
+
+$test('GEO core ignores keyword stuffing and caps non-indexable pages', static function () use ($assert): void {
+    $html = '<html lang="zh-CN"><head><title>品牌服务</title></head><body><h1>品牌服务</h1><p>' . str_repeat('品牌服务 ', 600) . '</p></body></html>';
+    $dom = new DOMDocument();
+    $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+    $xpath = new DOMXPath($dom);
+    $analysis = GeoCore::analyzeDocument($xpath, [
+        'url' => 'https://example.com/stuffed', 'http_status' => 200, 'indexable' => false,
+        'canonical_url' => '', 'title' => '品牌服务', 'description' => '', 'h1_count' => 1,
+        'language' => 'zh-CN', 'body_text' => str_repeat('品牌服务 ', 600), 'word_count' => 600, 'missing_alt' => 0,
+    ]);
+    $assert($analysis['score'] <= 45, 'Noindex page must remain capped.');
+    $assert($analysis['dimensions']['evidence_trust'] <= 20, 'Keyword repetition must not create trust evidence.');
+    $assert($analysis['dimensions']['entity_clarity'] <= 20, 'Keyword repetition must not create an entity graph.');
+});
+
+$test('GEO core rejects malformed JSON-LD as entity evidence', static function () use ($assert): void {
+    $html = '<html lang="en"><head><title>Example</title><script type="application/ld+json">{"@type":"Organization",</script></head><body><main><h1>Example</h1><p>Plain public page.</p></main></body></html>';
+    $dom = new DOMDocument();
+    $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+    $xpath = new DOMXPath($dom);
+    $analysis = GeoCore::analyzeDocument($xpath, [
+        'url' => 'https://example.com/', 'http_status' => 200, 'indexable' => true,
+        'canonical_url' => '', 'title' => 'Example', 'description' => '', 'h1_count' => 1,
+        'language' => 'en', 'body_text' => 'Plain public page.', 'word_count' => 3, 'missing_alt' => 0,
+    ]);
+    $assert($analysis['signals']['invalid_schema_count'] === 1);
+    $assert($analysis['signals']['schema_types'] === []);
+    $assert($analysis['primary_entities'] === []);
+});
+
+$test('GEO site aggregation separates robots policy from controlled HTTP probes', static function () use ($assert): void {
+    $dimensions = [
+        'retrievability' => 90, 'entity_clarity' => 80, 'answerability' => 75, 'evidence_trust' => 70,
+        'citation_readiness' => 80, 'freshness' => 70, 'localization' => 70, 'machine_readability' => 80,
+    ];
+    $pages = [
+        ['url' => 'https://example.com/', 'score' => 80, 'dimensions' => $dimensions, 'content_hash' => 'same', 'primary_entities' => ['Example'], 'intents' => ['home']],
+        ['url' => 'https://example.com/a', 'score' => 80, 'dimensions' => $dimensions, 'content_hash' => 'same', 'primary_entities' => ['Example'], 'intents' => ['service']],
+    ];
+    $snapshot = GeoCore::aggregate($pages, [
+        ['purpose' => 'search', 'robots_allowed' => 1, 'http_status' => 200, 'access_allowed' => 1],
+        ['purpose' => 'retrieval', 'robots_allowed' => 0, 'http_status' => null, 'access_allowed' => 0],
+    ]);
+    $assert($snapshot['coverage']['duplicate_page_count'] === 1);
+    $assert($snapshot['coverage']['bot_policy_allow_rate'] === 50.0);
+    $assert($snapshot['coverage']['bot_http_probe_rate'] === 100.0);
+    $assert($snapshot['coverage']['bot_http_probe_count'] === 1);
+    $assert($snapshot['coverage']['bot_access_rate'] === 100.0);
+    $assert($snapshot['coverage']['entity_consistency'] === 100.0);
+    $assert(in_array('service', array_keys($snapshot['coverage']['detected_intents']), true));
+    $assert(count($snapshot['recommendations']) > 0);
+
+    $policyOnly = GeoCore::aggregate($pages, [
+        ['purpose' => 'search', 'robots_allowed' => 1, 'http_status' => null, 'access_allowed' => 1],
+        ['purpose' => 'retrieval', 'robots_allowed' => 0, 'http_status' => null, 'access_allowed' => 0],
+    ]);
+    $assert($policyOnly['coverage']['bot_policy_allow_rate'] === 50.0);
+    $assert($policyOnly['coverage']['bot_http_probe_rate'] === null);
+    $assert($policyOnly['coverage']['bot_http_probe_count'] === 0);
+    $assert($policyOnly['coverage']['bot_access_rate'] === null);
 });
 
 $failed = array_filter($tests, static fn(array $row): bool => !$row['ok']);

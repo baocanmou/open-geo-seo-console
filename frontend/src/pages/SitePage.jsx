@@ -26,7 +26,7 @@ const tabs = [
   ['keywords', '关键词'],
   ['engines', '搜索引擎'],
   ['ai', 'AI推荐'],
-  ['content', '内容机会'],
+  ['content', 'GEO核心'],
   ['issues', '问题'],
   ['settings', '设置'],
 ]
@@ -56,6 +56,81 @@ function SiteScoreBand({ site }) {
         <div key={label}><Icon size={22} /><strong>{label}</strong><ScoreStatus score={score} /></div>
       ))}
     </section>
+  )
+}
+
+const geoDimensionLabels = {
+  retrievability: '检索可达性',
+  entity_clarity: '实体清晰度',
+  answerability: '答案可提取性',
+  evidence_trust: '证据与信任',
+  citation_readiness: '引用就绪度',
+  freshness: '时效透明度',
+  localization: '地域与语言',
+  machine_readability: '机器可读性',
+}
+
+function GeoCorePanel({ core, pages = [], showPages = false }) {
+  if (!core) {
+    return <EmptyState title="自有 GEO 核心等待首次采集" detail="无需第三方账号。系统会从公开页面计算 8 维信号、全站一致性和可执行优先级。" />
+  }
+  const coverage = core.coverage || {}
+  const dimensions = Object.entries(core.dimensions || {})
+  const recommendations = core.recommendations || []
+  const hasScore = core.overall_score !== null && core.overall_score !== undefined
+  return (
+    <div className="geo-core-panel">
+      <div className="geo-core-summary">
+        <div className="geo-core-score"><small>BCM-GEO Core</small><strong>{hasScore ? Math.round(Number(core.overall_score)) : '待采集'}</strong><span>v{core.algorithm_version}</span></div>
+        <div className="geo-core-coverage">
+          <span><small>30 天累计页面</small><strong>{formatNumber(coverage.page_count)}</strong></span>
+          <span><small>本轮有效 / 尝试</small><strong>{formatNumber(coverage.pages_sampled_this_run)} / {formatNumber(coverage.pages_attempted_this_run)}</strong></span>
+          <span><small>本轮发现候选</small><strong>{formatNumber(coverage.pages_discovered_this_run)}</strong></span>
+          <span><small>robots 策略允许</small><strong>{coverage.bot_policy_allow_rate == null ? '待测' : `${Math.round(Number(coverage.bot_policy_allow_rate))}%`}</strong></span>
+          <span><small>受控 HTTP 探测</small><strong>{coverage.bot_http_probe_rate == null ? '未启用' : `${Math.round(Number(coverage.bot_http_probe_rate))}%`}</strong></span>
+          <span><small>重复正文</small><strong>{formatNumber(coverage.duplicate_page_count)}</strong></span>
+          <span><small>实体一致性</small><strong>{coverage.entity_consistency == null ? '待识别' : `${Math.round(Number(coverage.entity_consistency))}%`}</strong></span>
+          <span><small>滚动证据窗口</small><strong>{formatNumber(coverage.rolling_window_days || 30)} 天</strong></span>
+        </div>
+      </div>
+      <div className="geo-dimension-grid">
+        {dimensions.map(([key, value]) => (
+          <div className="geo-dimension" key={key}>
+            <span><strong>{geoDimensionLabels[key] || key}</strong><em>{Math.round(Number(value))}</em></span>
+            <i><b style={{ width: `${Math.max(0, Math.min(100, Number(value)))}%` }} /></i>
+          </div>
+        ))}
+      </div>
+      <div className="geo-core-boundary">该分数只反映可核验的公开页面信号，不把抓取、提交或 llms.txt 误报为收录、排名或 AI 推荐。</div>
+      {recommendations.length > 0 && (
+        <div className="geo-recommendations">
+          <h3>算法优先建议</h3>
+          {recommendations.slice(0, 6).map((item) => (
+            <article key={`${item.dimension}-${item.title}`}>
+              <span>{Math.round(Number(item.priority_score))}</span>
+              <div><strong>{item.title}</strong><p>{item.action}</p><small>{item.label} · 影响 {formatNumber(item.affected_pages)} 页 · 置信度 {Math.round(Number(item.confidence) * 100)}%</small></div>
+            </article>
+          ))}
+        </div>
+      )}
+      {showPages && pages.length > 0 && (
+        <div className="table-scroll geo-page-table">
+          <table className="data-table compact-table">
+            <thead><tr><th>页面</th><th>GEO分数</th><th>识别意图</th><th>主体实体</th></tr></thead>
+            <tbody>
+              {pages.map((page) => (
+                <tr key={page.final_url}>
+                  <td><span className="truncate-url" title={page.final_url}>{page.final_url}</span></td>
+                  <td><ScoreStatus score={page.overall_score} /></td>
+                  <td>{(page.intents || []).join('、') || '待识别'}</td>
+                  <td>{(page.primary_entities || []).slice(0, 2).join('、') || '未声明'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -99,7 +174,7 @@ function FindingsTable({ findings }) {
 }
 
 function BotMatrix({ bots }) {
-  if (!bots.length) return <EmptyState title="暂无爬虫可访问性证据" detail="完成采集后检查 robots.txt 与真实页面访问。" />
+  if (!bots.length) return <EmptyState title="暂无爬虫策略证据" detail="完成采集后检查 robots.txt；受控 HTTP 探测为可选项。" />
   return (
     <div className="table-scroll">
       <table className="data-table compact-table bot-table">
@@ -110,8 +185,8 @@ function BotMatrix({ bots }) {
               <td><strong>{bot.bot_name}</strong></td>
               <td>{bot.purpose_label}</td>
               <td className={bot.robots_allowed ? 'success-text' : 'danger-text'}>{bot.robots_allowed ? '允许' : '限制'}</td>
-              <td>{bot.http_status || '—'}</td>
-              <td><StatusPill status={bot.access_allowed ? 'healthy' : 'warning'}>{bot.access_allowed ? '正常' : '需处理'}</StatusPill></td>
+              <td title={bot.evidence || ''}>{bot.http_status == null ? '未主动冒充探测' : `HTTP ${bot.http_status}`}</td>
+              <td><StatusPill status={bot.access_allowed ? 'healthy' : 'warning'}>{bot.http_status == null ? (bot.robots_allowed ? '策略允许' : '策略限制') : (bot.access_allowed ? '探测通过' : '探测失败')}</StatusPill></td>
             </tr>
           ))}
         </tbody>
@@ -299,6 +374,8 @@ export default function SitePage() {
     evidence,
     public_observations: publicObservations = [],
     platform_statuses: platformStatuses = [],
+    geo_core: geoCore,
+    geo_pages: geoPages = [],
     tasks,
   } = data
 
@@ -331,6 +408,12 @@ export default function SitePage() {
 
       <section className="site-layout">
         <div className="site-main-column">
+          {(activeTab === 'overview' || activeTab === 'content' || activeTab === 'pages') && (
+            <article className="panel">
+              <div className="panel-heading"><div><h2>自有 GEO 核心算法</h2><p>不依赖第三方账号的 8 维公开证据分析 · {geoCore?.coverage?.rolling_window_days || 30} 天滚动窗口</p></div><Network size={19} /></div>
+              <GeoCorePanel core={geoCore} pages={geoPages} showPages={activeTab === 'pages'} />
+            </article>
+          )}
           {(activeTab === 'overview' || activeTab === 'issues' || activeTab === 'pages' || activeTab === 'content') && (
             <article className="panel">
               <FindingsTable findings={activeTab === 'content' ? findings.filter((item) => item.category === 'geo') : findings} />
@@ -340,7 +423,7 @@ export default function SitePage() {
           {(activeTab === 'overview' || activeTab === 'issues') && (
             <div className="site-lower-grid">
               <article className="panel">
-                <div className="panel-heading"><div><h2>爬虫可访问性</h2><p>robots.txt 规则与真实 HTTP 响应分开检查</p></div></div>
+                <div className="panel-heading"><div><h2>爬虫策略与可达性</h2><p>robots.txt 全量解析；HTTP 用受控采集证据，不把伪装 User-Agent 当成真实官方爬虫。</p></div></div>
                 <BotMatrix bots={bots} />
               </article>
               <article className="panel">

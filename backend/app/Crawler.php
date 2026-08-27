@@ -30,14 +30,16 @@ final class FetchResult
 
 final class SafeHttpClient
 {
-    private const DEFAULT_UA = 'OPENGEO-Audit/1.0 (+https://github.com/yht0912/open-geo-seo-console)';
+    private const DEFAULT_UA = 'Mozilla/5.0 (compatible; OpenGEO-Audit/1.0; +https://github.com/yht0912/open-geo-seo-console)';
     private float $auditStartedAt = 0.0;
+    private float $lastRequestAt = 0.0;
     private int $auditRequests = 0;
     private int $auditBytes = 0;
 
     public function beginAudit(): void
     {
         $this->auditStartedAt = microtime(true);
+        $this->lastRequestAt = 0.0;
         $this->auditRequests = 0;
         $this->auditBytes = 0;
     }
@@ -162,6 +164,15 @@ final class SafeHttpClient
             return;
         }
         $this->enforceAuditBudget();
+        $minimumIntervalMs = max(0, min(Config::int('CRAWL_MIN_INTERVAL_MS', 1000), 10000));
+        if ($minimumIntervalMs > 0 && $this->lastRequestAt > 0) {
+            $elapsedMs = (microtime(true) - $this->lastRequestAt) * 1000;
+            if ($elapsedMs < $minimumIntervalMs) {
+                usleep((int) (($minimumIntervalMs - $elapsedMs) * 1000));
+                $this->enforceAuditBudget();
+            }
+        }
+        $this->lastRequestAt = microtime(true);
         $this->auditRequests++;
         if ($this->auditRequests > max(10, min(Config::int('AUDIT_MAX_REQUESTS', 64), 100))) {
             throw new AuditBudgetExceeded('Audit request budget exceeded.');
@@ -178,7 +189,7 @@ final class SafeHttpClient
         if ($this->auditStartedAt <= 0) {
             return;
         }
-        $maxSeconds = max(15, min(Config::int('AUDIT_MAX_SECONDS', 50), 300));
+        $maxSeconds = max(15, min(Config::int('AUDIT_MAX_SECONDS', 120), 300));
         $maxBytes = max(1048576, min(Config::int('AUDIT_MAX_TOTAL_BYTES', 16777216), 33554432));
         if (microtime(true) - $this->auditStartedAt > $maxSeconds) {
             throw new AuditBudgetExceeded('Audit time budget exceeded.');
@@ -211,7 +222,7 @@ final class SafeHttpClient
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_PROXY => '',
-            CURLOPT_HTTPHEADER => ['Accept: text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5', 'Accept-Encoding: identity'],
+            CURLOPT_HTTPHEADER => ['Accept: text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5'],
             CURLOPT_RESOLVE => ["{$host}:{$port}:{$resolveIp}"],
             CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$headers, &$headerBytes, &$headersTooLarge): int {
                 $length = strlen($line);

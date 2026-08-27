@@ -158,6 +158,8 @@ final class Api
         $run = $runStmt->fetch() ?: null;
         $findings = [];
         $bots = [];
+        $geoCore = null;
+        $geoPages = [];
         if ($run !== null) {
             $findStmt = $this->db->prepare('SELECT public_id AS id, category, severity, title, evidence, recommendation, affected_url, affected_count, status, detected_at FROM findings WHERE audit_run_id = (SELECT id FROM audit_runs WHERE public_id = ?) ORDER BY FIELD(severity, \'critical\',\'high\',\'medium\',\'low\',\'info\'), id');
             $findStmt->execute([$run['id']]);
@@ -165,6 +167,39 @@ final class Api
             $botStmt = $this->db->prepare('SELECT bot_name, purpose, purpose_label, robots_allowed, http_status, access_allowed, evidence, checked_at FROM bot_checks WHERE audit_run_id = (SELECT id FROM audit_runs WHERE public_id = ?) ORDER BY FIELD(purpose, \'search\',\'retrieval\',\'training\',\'extended\'), bot_name');
             $botStmt->execute([$run['id']]);
             $bots = $botStmt->fetchAll();
+            $geoStmt = $this->db->prepare('SELECT algorithm_version, formula_hash, overall_score, dimensions_json, coverage_json, recommendations_json, computed_at FROM geo_site_snapshots WHERE audit_run_id = (SELECT id FROM audit_runs WHERE public_id = ?) LIMIT 1');
+            $geoStmt->execute([$run['id']]);
+            $geoCore = $geoStmt->fetch() ?: null;
+            if ($geoCore !== null) {
+                foreach (['dimensions_json' => 'dimensions', 'coverage_json' => 'coverage', 'recommendations_json' => 'recommendations'] as $column => $key) {
+                    $decoded = json_decode((string) $geoCore[$column], true, 64);
+                    $geoCore[$key] = is_array($decoded) ? $decoded : [];
+                    unset($geoCore[$column]);
+                }
+                $rollingDays = max(1, min(Config::int('GEO_ROLLING_WINDOW_DAYS', 30), 90));
+                $geoPageStmt = $this->db->prepare("SELECT final_url, overall_score, dimensions_json, signals_json, primary_entities_json, intents_json, captured_at FROM geo_page_signals WHERE site_id = ? AND algorithm_version = ? AND formula_hash = ? AND captured_at >= DATE_SUB(NOW(), INTERVAL {$rollingDays} DAY) ORDER BY id DESC LIMIT 500");
+                $geoPageStmt->execute([(int) $site['id'], GeoCore::VERSION, GeoCore::formulaHash()]);
+                $rollingRows = $geoPageStmt->fetchAll();
+                $seenGeoUrls = [];
+                foreach ($rollingRows as $geoPage) {
+                    $url = (string) $geoPage['final_url'];
+                    if ($url === '' || isset($seenGeoUrls[$url])) {
+                        continue;
+                    }
+                    $seenGeoUrls[$url] = true;
+                    $geoPages[] = $geoPage;
+                }
+                foreach ($geoPages as &$geoPage) {
+                    foreach (['dimensions_json' => 'dimensions', 'signals_json' => 'signals', 'primary_entities_json' => 'primary_entities', 'intents_json' => 'intents'] as $column => $key) {
+                        $decoded = json_decode((string) $geoPage[$column], true, 64);
+                        $geoPage[$key] = is_array($decoded) ? $decoded : [];
+                        unset($geoPage[$column]);
+                    }
+                }
+                unset($geoPage);
+                usort($geoPages, static fn(array $a, array $b): int => ((float) $a['overall_score']) <=> ((float) $b['overall_score']));
+                $geoPages = array_slice($geoPages, 0, 100);
+            }
         }
         $taskStmt = $this->db->prepare("SELECT t.public_id AS id, t.title, t.description, t.category, t.priority, t.status, t.assignee, t.created_at FROM tasks t WHERE t.site_id = ? ORDER BY FIELD(t.status,'open','in_progress','resolved'), FIELD(t.priority,'critical','high','medium','low'), t.created_at DESC LIMIT 60");
         $taskStmt->execute([$site['id']]);
@@ -190,6 +225,8 @@ final class Api
             'latest_run' => $run,
             'findings' => $findings,
             'bot_checks' => $bots,
+            'geo_core' => $geoCore,
+            'geo_pages' => $geoPages,
             'integrations' => $this->integrations(),
             'evidence' => $evidenceStmt->fetchAll(),
             'public_observations' => $observations,
