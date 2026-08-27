@@ -25,6 +25,8 @@ Each run keeps the homepage in the sample and rotates a bounded set of additiona
 
 The normal worker also enforces `AUDIT_GLOBAL_MIN_INTERVAL_SECONDS` across sites. The default 45-second cooldown protects shared CDN/WAF infrastructure even if an operator repeatedly invokes the worker; queued jobs stay pending until a later invocation rather than bypassing the limit.
 
+If the latest completed audit contains no valid page and records `crawler_access_denied`, the worker opens a shared denial circuit for `AUDIT_DENIAL_BACKOFF_MINUTES` (60 minutes by default). It does not consume the next queued site during that interval. After the interval, one audit is allowed as a recovery probe; another denial reopens the circuit. This prevents a temporary shared WAF block from being amplified across the inventory.
+
 ## Priority model
 
 Recommendations are ranked from the observed score gap, dimension weight, affected page count, confidence, and estimated effort. The result is an explainable work queue, not an automatic content-generation instruction. High-impact changes still require editorial review because structured data and evidence must match visible facts.

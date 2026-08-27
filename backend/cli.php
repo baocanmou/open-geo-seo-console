@@ -159,6 +159,20 @@ try {
             break;
 
         case 'worker':
+            $denialBackoffMinutes = max(0, min(Config::int('AUDIT_DENIAL_BACKOFF_MINUTES', 60), 1440));
+            if ($denialBackoffMinutes > 0) {
+                $recentDenial = $db->query("SELECT 1
+                  FROM audit_runs ar
+                  JOIN findings f ON f.audit_run_id = ar.id AND f.code = 'crawler_access_denied'
+                  WHERE ar.status = 'completed'
+                    AND ar.pages_audited = 0
+                    AND ar.completed_at >= DATE_SUB(NOW(), INTERVAL {$denialBackoffMinutes} MINUTE)
+                  LIMIT 1")->fetchColumn();
+                if ($recentDenial) {
+                    fwrite(STDOUT, "Site audit worker is inside the shared crawler-denial backoff.\n");
+                    break;
+                }
+            }
             $globalInterval = max(0, min(Config::int('AUDIT_GLOBAL_MIN_INTERVAL_SECONDS', 45), 300));
             if ($globalInterval > 0) {
                 $recentAudit = $db->query("SELECT 1 FROM audit_runs WHERE status = 'completed' AND completed_at >= DATE_SUB(NOW(), INTERVAL {$globalInterval} SECOND) LIMIT 1")->fetchColumn();

@@ -105,6 +105,13 @@ $test('site audit worker enforces a bounded global crawl cooldown', static funct
     $assert(str_contains($cliSource, 'global crawl cooldown'));
 });
 
+$test('site audit worker opens a shared denial circuit instead of burning the queue', static function () use ($assert, $cliSource): void {
+    $assert(str_contains($cliSource, "AUDIT_DENIAL_BACKOFF_MINUTES', 60"));
+    $assert(str_contains($cliSource, "f.code = 'crawler_access_denied'"));
+    $assert(str_contains($cliSource, 'ar.pages_audited = 0'));
+    $assert(str_contains($cliSource, 'shared crawler-denial backoff'));
+});
+
 $test('UUID v4 format', static function () use ($assert): void {
     $assert((bool) preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', Security::uuid()));
 });

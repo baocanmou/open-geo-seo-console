@@ -15,6 +15,7 @@ The repository ships with reserved example domains only. It contains no producti
 - Protects the console with Argon2id-compatible password hashing, stateless pre-login CSRF, same-origin checks, nonblocking per-account verification serialization, per-IP and account-plus-IP failure limits, strict cookies, idle and absolute session expiry, session-ID rotation, password-change revocation, and browser binding.
 - Lets an authenticated administrator change the password from Account & Security after re-entering the current password; other sessions are revoked and the active session receives a new ID and CSRF token.
 - Bounds every audit by elapsed time, total requests, total response bytes, per-document size, and a singleton worker lease.
+- Opens a shared denial circuit after a zero-page 403/429 audit, preserving the remaining queue until the WAF backoff expires.
 - Encrypts integration configuration at rest with libsodium when configuration is supplied by an authorized deployment.
 
 ## Built-in GEO core
