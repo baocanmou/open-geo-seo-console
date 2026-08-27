@@ -11,6 +11,7 @@ The repository ships with reserved example domains only. It contains no producti
 - Catalogs 36 search, AI, analytics, and submission integrations with explicit `public`, `official`, or `manual` evidence modes.
 - Stores search snapshots, AI answer evidence, findings, tasks, audit runs, and privacy-preserving activity records.
 - Protects the console with Argon2id-compatible password hashing, stateless pre-login CSRF, same-origin checks, nonblocking per-account verification serialization, per-IP and account-plus-IP failure limits, strict cookies, idle and absolute session expiry, session-ID rotation, password-change revocation, and browser binding.
+- Lets an authenticated administrator change the password from Account & Security after re-entering the current password; other sessions are revoked and the active session receives a new ID and CSRF token.
 - Bounds every audit by elapsed time, total requests, total response bytes, per-document size, and a singleton worker lease.
 - Encrypts integration configuration at rest with libsodium when configuration is supplied by an authorized deployment.
 
@@ -50,6 +51,7 @@ unset ADMIN_PASSWORD
 ```
 
 Use a unique random value of at least 16 characters. See [Deployment](docs/DEPLOYMENT.md), [Architecture](docs/ARCHITECTURE.md), and [Security Policy](SECURITY.md).
+The self-service password policy defaults to 16 characters through `PASSWORD_MIN_LENGTH`; deployments may set a bounded value from 8 to 128 without changing source code.
 
 ## Scheduled collection
 

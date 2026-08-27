@@ -13,6 +13,7 @@ Unknown `APP_ENV` values also fail startup, and HTTP responses never display raw
 
 Keep the audit time, request, and byte budgets enabled. Lower them for small hosts; do not raise them until worker, database, and outbound-network limits have been measured.
 Keep failed-audit backoff enabled so an unavailable or adversarial registered target cannot be rescheduled every minute.
+Keep `PASSWORD_MIN_LENGTH=16` unless a documented deployment requirement justifies a different bounded value. The application accepts values from 8 to 128 and never stores the plaintext password.
 
 ## 3. Build and initialize
 
@@ -63,6 +64,7 @@ Run one manual audit under the dedicated account without `--no-sandbox`. Only af
 - HTTPS redirects and HSTS are correct.
 - API responses include no-store and framing protections.
 - Login works with `bcm`; a legacy or sample account does not.
+- Account & Security rejects a wrong current password, accepts a policy-compliant new password, rotates the active session, and invalidates other sessions.
 - Session idle, absolute, rotation, CSRF, origin, and failed-login controls behave as configured.
 - The worker can reach registered public hosts but rejects private or cross-domain targets.
 - Backups restore successfully in an isolated environment.

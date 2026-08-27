@@ -64,7 +64,6 @@ export default function LoginPage({ onLogin, initialError }) {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
-                minLength={16}
                 maxLength={200}
               />
               <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? '隐藏密码' : '显示密码'}>

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use OpenGeo\FetchResult;
+use OpenGeo\PasswordPolicy;
 use OpenGeo\RobotsPolicy;
 use OpenGeo\Security;
 use OpenGeo\SafeHttpClient;
@@ -38,6 +39,45 @@ $assert = static function (bool $condition, string $message = 'Assertion failed'
         throw new RuntimeException($message);
     }
 };
+
+$test('password policy keeps a strong public default and supports a bounded private override', static function () use ($assert): void {
+    putenv('PASSWORD_MIN_LENGTH=');
+    $assert(PasswordPolicy::minimumLength() === 16);
+
+    putenv('PASSWORD_MIN_LENGTH=9');
+    $assert(PasswordPolicy::minimumLength() === 9);
+    PasswordPolicy::validate('A1b2C3d4E', 'bcm');
+    putenv('PASSWORD_MIN_LENGTH=');
+});
+
+$test('password policy rejects short, oversized and username-equal values', static function () use ($assert): void {
+    putenv('PASSWORD_MIN_LENGTH=16');
+    foreach (['short-value', str_repeat('a', 201), 'bcm'] as $blocked) {
+        try {
+            PasswordPolicy::validate($blocked, 'bcm');
+            $assert(false, 'Unsafe password was accepted.');
+        } catch (OpenGeo\HttpError $error) {
+            $assert($error->status === 422);
+        }
+    }
+    putenv('PASSWORD_MIN_LENGTH=');
+});
+
+$test('password change route verifies CSRF, current password and revokes other sessions', static function () use ($assert): void {
+    $apiSource = file_get_contents(dirname(__DIR__) . '/app/Api.php');
+    $coreSource = file_get_contents(dirname(__DIR__) . '/app/Core.php');
+    $assert(is_string($apiSource) && is_string($coreSource));
+    $assert(str_contains($apiSource, "'/account/password'"));
+    $assert(str_contains($apiSource, 'Security::verifyUnsafeRequest()'));
+    $assert(str_contains($coreSource, 'password_verify($currentPassword'));
+    $assert(str_contains($coreSource, "'password-change-account|'"));
+    $assert(str_contains($coreSource, "'password-change-pair|'"));
+    $assert(str_contains($coreSource, "'password-change-ip|'"));
+    $assert(str_contains($coreSource, '$accountFailures >= 10'));
+    $assert(str_contains($coreSource, 'session_version = session_version + 1'));
+    $assert(str_contains($coreSource, 'Security::refreshAuthenticatedSession'));
+    $assert(str_contains($coreSource, "Activity::record('auth.password_changed'"));
+});
 
 $test('site audits and Lighthouse collections use separate privilege queues', static function () use ($assert, $cliSource): void {
     $assert(str_contains($cliSource, "job_type = 'site_audit'"));

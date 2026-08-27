@@ -114,6 +114,29 @@ final class HttpError extends RuntimeException
     }
 }
 
+final class PasswordPolicy
+{
+    public static function minimumLength(): int
+    {
+        return max(8, min(Config::int('PASSWORD_MIN_LENGTH', 16), 128));
+    }
+
+    public static function validate(string $password, string $username = ''): void
+    {
+        $minimumLength = self::minimumLength();
+        $length = mb_check_encoding($password, 'UTF-8') ? mb_strlen($password, 'UTF-8') : 0;
+        $sameAsUsername = $username !== ''
+            && mb_strtolower($password, 'UTF-8') === mb_strtolower($username, 'UTF-8');
+        if ($length < $minimumLength
+            || $length > 128
+            || strlen($password) > 200
+            || preg_match('/[\x00-\x1F\x7F]/u', $password)
+            || $sameAsUsername) {
+            throw new HttpError(422, "新密码至少需要 {$minimumLength} 个字符，且不能与账号相同");
+        }
+    }
+}
+
 final class Response
 {
     public static function json(array $payload, int $status = 200): never
@@ -224,6 +247,19 @@ final class Security
         $_SESSION['last_seen'] = $now;
         $_SESSION['rotated_at'] = $now;
         $_SESSION['user_agent_hash'] = self::userAgentHash();
+    }
+
+    public static function refreshAuthenticatedSession(int $sessionVersion): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE || (int) ($_SESSION['user_id'] ?? 0) < 1) {
+            throw new HttpError(401, '请先登录');
+        }
+        session_regenerate_id(true);
+        $now = time();
+        $_SESSION['session_version'] = $sessionVersion;
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+        $_SESSION['last_seen'] = $now;
+        $_SESSION['rotated_at'] = $now;
     }
 
     private static function configureSession(): void
@@ -439,7 +475,8 @@ final class Auth
         $username = trim($username);
         if (!preg_match('/\A[a-zA-Z0-9._-]{3,64}\z/', $username)
             || !mb_check_encoding($password, 'UTF-8')
-            || mb_strlen($password, 'UTF-8') < 16
+            || mb_strlen($password, 'UTF-8') < 1
+            || mb_strlen($password, 'UTF-8') > 128
             || strlen($password) > 200) {
             throw new HttpError(422, '账号或密码格式不正确');
         }
@@ -499,6 +536,86 @@ final class Auth
         }
         Activity::record('auth.login', 'user', (string) $row['public_id']);
         return ['id' => $row['public_id'], 'username' => $row['username'], 'display_name' => $row['display_name'], 'role' => $row['role']];
+    }
+
+    public static function changePassword(array $user, string $currentPassword, string $newPassword, string $confirmation): array
+    {
+        if (!mb_check_encoding($currentPassword, 'UTF-8')
+            || $currentPassword === ''
+            || mb_strlen($currentPassword, 'UTF-8') > 128
+            || strlen($currentPassword) > 200) {
+            throw new HttpError(422, '当前密码格式不正确');
+        }
+        if (!hash_equals($newPassword, $confirmation)) {
+            throw new HttpError(422, '两次输入的新密码不一致');
+        }
+        PasswordPolicy::validate($newPassword, (string) ($user['username'] ?? ''));
+
+        $db = Database::connection();
+        $userId = (int) ($user['id'] ?? 0);
+        $clientIp = Security::clientIp();
+        $accountHash = hash_hmac('sha256', 'password-change-account|' . $userId, Config::get('APP_KEY'));
+        $pairHash = hash_hmac('sha256', 'password-change-pair|' . $userId . '|' . $clientIp, Config::get('APP_KEY'));
+        $ipHash = hash_hmac('sha256', 'password-change-ip|' . $clientIp, Config::get('APP_KEY'));
+        $lockName = 'opg-password-' . substr(hash_hmac('sha256', (string) $userId, Config::get('APP_KEY')), 0, 40);
+        $lock = $db->prepare('SELECT GET_LOCK(?, 0)');
+        $lock->execute([$lockName]);
+        if ((int) $lock->fetchColumn() !== 1) {
+            throw new HttpError(429, '密码修改请求过于频繁，请稍后再试');
+        }
+
+        try {
+            $guard = $db->prepare('SELECT identity_hash, COUNT(*) AS failures FROM login_attempts WHERE identity_hash IN (?, ?, ?) AND succeeded = 0 AND attempted_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE) GROUP BY identity_hash');
+            $guard->execute([$accountHash, $pairHash, $ipHash]);
+            $failures = array_fill_keys([$accountHash, $pairHash, $ipHash], 0);
+            foreach ($guard->fetchAll() as $guardRow) {
+                $failures[(string) $guardRow['identity_hash']] = (int) $guardRow['failures'];
+            }
+            $accountFailures = $failures[$accountHash];
+            if ($failures[$pairHash] >= 5 || $accountFailures >= 10 || $failures[$ipHash] >= 20) {
+                throw new HttpError(429, '当前密码连续验证失败，请 15 分钟后再试');
+            }
+
+            $db->beginTransaction();
+            $rowStmt = $db->prepare("SELECT id, public_id, username, password_hash, session_version FROM app_users WHERE id = ? AND status = 'active' LIMIT 1 FOR UPDATE");
+            $rowStmt->execute([$userId]);
+            $row = $rowStmt->fetch();
+            if (!$row || !password_verify($currentPassword, (string) $row['password_hash'])) {
+                $logFailure = $db->prepare('INSERT INTO login_attempts (identity_hash, succeeded, attempted_at) VALUES (?, 0, NOW()), (?, 0, NOW()), (?, 0, NOW())');
+                $logFailure->execute([$accountHash, $pairHash, $ipHash]);
+                $db->commit();
+                Activity::record('auth.password_change_failed', 'user', (string) ($user['public_id'] ?? ''));
+                throw new HttpError(401, '当前密码不正确');
+            }
+            if (password_verify($newPassword, (string) $row['password_hash'])) {
+                throw new HttpError(422, '新密码不能与当前密码相同');
+            }
+
+            $algorithm = defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT;
+            $hash = password_hash($newPassword, $algorithm);
+            if (!is_string($hash) || $hash === '') {
+                throw new RuntimeException('Password hashing failed.');
+            }
+            $db->prepare('UPDATE app_users SET password_hash = ?, session_version = session_version + 1, updated_at = NOW() WHERE id = ?')->execute([$hash, $userId]);
+            $versionStmt = $db->prepare('SELECT session_version FROM app_users WHERE id = ?');
+            $versionStmt->execute([$userId]);
+            $newSessionVersion = (int) $versionStmt->fetchColumn();
+            $clearFailures = $db->prepare('DELETE FROM login_attempts WHERE identity_hash IN (?, ?)');
+            $clearFailures->execute([$accountHash, $pairHash]);
+            $db->commit();
+        } catch (Throwable $error) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $error;
+        } finally {
+            $release = $db->prepare('SELECT RELEASE_LOCK(?)');
+            $release->execute([$lockName]);
+        }
+
+        Security::refreshAuthenticatedSession($newSessionVersion);
+        Activity::record('auth.password_changed', 'user', (string) $row['public_id'], ['other_sessions_revoked' => true]);
+        return ['changed' => true, 'other_sessions_revoked' => true];
     }
 }
 

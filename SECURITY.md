@@ -15,6 +15,7 @@ Include the affected commit, reproduction steps against a local or disposable en
 - Keep `.env` outside version control and readable only by the service account.
 - Use a dedicated least-privilege database user and a unique application key.
 - Terminate TLS at a maintained reverse proxy and keep `SESSION_SECURE=true`.
+- Keep the default 16-character password policy when practical; changing a password must require the current password, same-origin CSRF validation, throttling, session rotation, and revocation of other sessions.
 - Do not expose MySQL, PHP-FPM, storage, migrations, seeds, or CLI files publicly.
 - Grant third-party OAuth scopes and API tokens only when a collector needs them.
 - Do not enable local Lighthouse without the dedicated account, fixed-port firewall template, live rule verification, Chromium sandbox, serial lock, and root-owned readiness marker.

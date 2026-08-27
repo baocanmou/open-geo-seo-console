@@ -44,10 +44,26 @@ final class Api
 
         Security::startSession();
         $user = Auth::requireUser();
-        Auth::requireRole($user, ['admin']);
         if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
             Security::verifyUnsafeRequest();
         }
+        if ($method === 'GET' && $path === '/account/security') {
+            Response::ok([
+                'password_min_length' => PasswordPolicy::minimumLength(),
+                'other_sessions_revoked_on_change' => true,
+            ]);
+        }
+        if ($method === 'POST' && $path === '/account/password') {
+            $body = Security::jsonBody();
+            $result = Auth::changePassword(
+                $user,
+                (string) ($body['current_password'] ?? ''),
+                (string) ($body['new_password'] ?? ''),
+                (string) ($body['new_password_confirmation'] ?? '')
+            );
+            Response::ok($result, Security::csrfToken());
+        }
+        Auth::requireRole($user, ['admin']);
         if ($method === 'GET' && $path === '/dashboard') {
             Response::ok($this->dashboard());
         }

@@ -9,13 +9,15 @@ import {
   Globe2,
   Lightbulb,
   ListChecks,
+  LogOut,
+  KeyRound,
   Menu,
   Network,
   Search,
   Settings,
   X,
 } from 'lucide-react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 
 const navigation = [
   { to: '/', label: '概览', icon: CircleGauge },
@@ -37,6 +39,7 @@ export default function AppShell({ user, onLogout, children }) {
 
   useEffect(() => {
     setMenuOpen(false)
+    setProfileOpen(false)
   }, [location.pathname])
 
   return (
@@ -88,9 +91,10 @@ export default function AppShell({ user, onLogout, children }) {
             <ChevronDown size={16} className={profileOpen ? 'rotate-180' : ''} />
           </button>
           {profileOpen && (
-            <button className="logout-button" type="button" onClick={onLogout}>
-              退出登录
-            </button>
+            <div className="profile-menu">
+              <Link to="/settings"><KeyRound size={16} />修改密码</Link>
+              <button type="button" onClick={onLogout}><LogOut size={16} />退出登录</button>
+            </div>
           )}
         </div>
       </aside>

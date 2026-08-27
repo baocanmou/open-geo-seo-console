@@ -54,6 +54,15 @@ export const api = {
     body: { username, password },
   }),
   logout: () => request('/api/auth/logout', { method: 'POST', body: {} }),
+  accountSecurity: () => request('/api/account/security'),
+  changePassword: (currentPassword, newPassword, confirmation) => request('/api/account/password', {
+    method: 'POST',
+    body: {
+      current_password: currentPassword,
+      new_password: newPassword,
+      new_password_confirmation: confirmation,
+    },
+  }),
   dashboard: () => request('/api/dashboard'),
   sites: () => request('/api/sites'),
   site: (id) => request(`/api/sites/${encodeURIComponent(id)}`),

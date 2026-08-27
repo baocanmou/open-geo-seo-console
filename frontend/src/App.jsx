@@ -5,6 +5,7 @@ import AppShell from './components/AppShell'
 import DashboardPage from './pages/DashboardPage'
 import IntegrationsPage from './pages/IntegrationsPage'
 import LoginPage from './pages/LoginPage'
+import SettingsPage from './pages/SettingsPage'
 import SitePage from './pages/SitePage'
 import SitesPage from './pages/SitesPage'
 import TasksPage from './pages/TasksPage'
@@ -69,7 +70,7 @@ function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/reports" element={<WorkspacePage mode="reports" />} />
-        <Route path="/settings" element={<WorkspacePage mode="settings" />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>
