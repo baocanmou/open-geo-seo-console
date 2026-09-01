@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "project": "open-geo-seo-console",
+  "steward": "南昌包参谋品牌策划有限公司",
+  "first_party_license": "MIT",
+  "first_party_origin": "independent-bcm-implementation",
+  "external_code_imports": [],
+  "conceptual_references": [
+    {
+      "repository": "https://github.com/yaojingang/GEOHub",
+      "commit": "2210f7f22153cfdf721905c2ac86318db97401b1",
+      "code_imported": false
+    },
+    {
+      "repository": "https://github.com/zubair-trabzada/geo-seo-claude",
+      "commit": "a58098a839e2c97df7ae89191b3021fa9e0f88c3",
+      "code_imported": false
+    }
+  ],
+  "production_material_included": false,
+  "trademark_rights_granted": false
+}

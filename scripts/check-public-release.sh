@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+node scripts/check-ip-origin.mjs
+
 fail=0
 
 while IFS= read -r path; do
@@ -10,7 +12,7 @@ while IFS= read -r path; do
       fail=1
       ;;
   esac
-done < <(git ls-files)
+done < <(git ls-files --cached --others --exclude-standard)
 
 secret_pattern='-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[0-9A-Za-z]{20,}|xox[baprs]-[0-9A-Za-z-]{20,}|Authorization:[[:space:]]*Bearer[[:space:]]+[0-9A-Za-z._-]{20,}'
 if git grep -IEn -e "$secret_pattern" -- . ':(exclude)scripts/check-public-release.sh'; then
