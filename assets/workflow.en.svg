@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+<title>How Open GEO SEO Console works</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#111111"/></marker></defs>
+<rect x="0" y="0" width="1200" height="480" rx="24" fill="#faf8f3"/>
+<text x="40" y="58" font-size="26" font-weight="700" fill="#111111">How Open GEO SEO Console works</text>
+<text x="40" y="88" font-size="15" fill="#686860">Public collection, scoring and official data stay in separate layers; crawlable is never reported as indexed.</text>
+<rect x="40" y="120" width="160" height="190" rx="14" fill="#ffffff" stroke="#111111" stroke-width="1.5"/>
+<circle cx="66" cy="150" r="14" fill="#111111"/>
+<text x="66" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+<text x="88" y="156" font-size="17" font-weight="700" fill="#111111">Install</text>
+<line x1="54" y1="178" x2="186" y2="178" stroke="#e4e0d5" stroke-width="1"/>
+<text x="54" y="206" font-size="13" fill="#686860">migrate: schema</text>
+<text x="54" y="232" font-size="13" fill="#686860">seed: sites and</text>
+<text x="54" y="258" font-size="13" fill="#686860">36 integrations</text>
+<text x="54" y="284" font-size="13" fill="#686860">create-admin</text>
+<line x1="203" y1="215.0" x2="231" y2="215.0" stroke="#111111" stroke-width="2" marker-end="url(#a)"/>
+<rect x="234" y="120" width="160" height="190" rx="14" fill="#ffffff" stroke="#111111" stroke-width="1.5"/>
+<circle cx="260" cy="150" r="14" fill="#111111"/>
+<text x="260" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+<text x="282" y="156" font-size="17" font-weight="700" fill="#111111">Add sites</text>
+<line x1="248" y1="178" x2="380" y2="178" stroke="#e4e0d5" stroke-width="1"/>
+<text x="248" y="206" font-size="13" fill="#686860">Edit</text>
+<text x="248" y="232" font-size="13" fill="#686860">seeds/catalog.php:</text>
+<text x="248" y="258" font-size="13" fill="#686860">domains, aliases,</text>
+<text x="248" y="284" font-size="13" fill="#686860">groups, page caps</text>
+<line x1="397" y1="215.0" x2="425" y2="215.0" stroke="#111111" stroke-width="2" marker-end="url(#a)"/>
+<rect x="428" y="120" width="160" height="190" rx="14" fill="#ffffff" stroke="#111111" stroke-width="1.5"/>
+<circle cx="454" cy="150" r="14" fill="#111111"/>
+<text x="454" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+<text x="476" y="156" font-size="17" font-weight="700" fill="#111111">Schedule</text>
+<line x1="442" y1="178" x2="574" y2="178" stroke="#e4e0d5" stroke-width="1"/>
+<text x="442" y="206" font-size="13" fill="#686860">cron runs schedule</text>
+<text x="442" y="232" font-size="13" fill="#686860">and staggers sites</text>
+<text x="442" y="258" font-size="13" fill="#686860">into the jobs queue</text>
+<text x="442" y="284" font-size="13" fill="#686860">under flock</text>
+<line x1="591" y1="215.0" x2="619" y2="215.0" stroke="#111111" stroke-width="2" marker-end="url(#a)"/>
+<rect x="622" y="120" width="160" height="190" rx="14" fill="#ffd900" stroke="#111111" stroke-width="2"/>
+<circle cx="648" cy="150" r="14" fill="#111111"/>
+<text x="648" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+<text x="670" y="156" font-size="17" font-weight="700" fill="#111111">Crawl</text>
+<line x1="636" y1="178" x2="768" y2="178" stroke="#111111" stroke-width="1"/>
+<text x="636" y="206" font-size="13" fill="#111111">worker reads robots,</text>
+<text x="636" y="232" font-size="13" fill="#111111">sitemaps, llms.txt</text>
+<text x="636" y="258" font-size="13" fill="#111111">and a rotating batch</text>
+<text x="636" y="284" font-size="13" fill="#111111">within budgets</text>
+<line x1="785" y1="215.0" x2="813" y2="215.0" stroke="#111111" stroke-width="2" marker-end="url(#a)"/>
+<rect x="816" y="120" width="160" height="190" rx="14" fill="#ffd900" stroke="#111111" stroke-width="2"/>
+<circle cx="842" cy="150" r="14" fill="#111111"/>
+<text x="842" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+<text x="864" y="156" font-size="17" font-weight="700" fill="#111111">Score</text>
+<line x1="830" y1="178" x2="962" y2="178" stroke="#111111" stroke-width="1"/>
+<text x="830" y="206" font-size="13" fill="#111111">8 GEO dimensions</text>
+<text x="830" y="232" font-size="13" fill="#111111">formula hash</text>
+<text x="830" y="258" font-size="13" fill="#111111">30-day rolling</text>
+<text x="830" y="284" font-size="13" fill="#111111">site aggregate</text>
+<line x1="979" y1="215.0" x2="1007" y2="215.0" stroke="#111111" stroke-width="2" marker-end="url(#a)"/>
+<rect x="1010" y="120" width="160" height="190" rx="14" fill="#ffffff" stroke="#111111" stroke-width="1.5"/>
+<circle cx="1036" cy="150" r="14" fill="#111111"/>
+<text x="1036" y="155" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+<text x="1058" y="156" font-size="17" font-weight="700" fill="#111111">Tasks</text>
+<line x1="1024" y1="178" x2="1156" y2="178" stroke="#e4e0d5" stroke-width="1"/>
+<text x="1024" y="206" font-size="13" fill="#686860">Findings ranked by</text>
+<text x="1024" y="232" font-size="13" fill="#686860">impact, effort and</text>
+<text x="1024" y="258" font-size="13" fill="#686860">confidence, then</text>
+<text x="1024" y="284" font-size="13" fill="#686860">handled in the UI</text>
+<path d="M508.0,312 L508.0,358" stroke="#686860" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#a)"/>
+<rect x="408" y="362" width="762" height="92" rx="14" fill="#ffffff" stroke="#686860" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="428" y="392" font-size="16" font-weight="700" fill="#111111">Separate lane: public-worker</text>
+<text x="428" y="418" font-size="13" fill="#686860">Starts as root, then switches to a dedicated low-privilege account to collect Common Crawl index data</text>
+<text x="428" y="440" font-size="13" fill="#686860">and isolated Lighthouse lab results. Stored separately; not part of the GEO score or proof of ranking.</text>
+<rect x="40" y="362" width="348" height="92" rx="14" fill="none" stroke="#e4e0d5" stroke-width="1.5"/>
+<text x="58" y="386" font-size="13" fill="#686860">Official APIs and AI</text>
+<text x="58" y="405" font-size="13" fill="#686860">platforms are listed</text>
+<text x="58" y="424" font-size="13" fill="#686860">as unconfigured; no</text>
+<text x="58" y="443" font-size="13" fill="#686860">collectors ship here</text>
+</svg>
